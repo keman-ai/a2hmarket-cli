@@ -33,7 +33,7 @@ func genAuthCodeCommand() *cli.Command {
 		Action: genAuthCodeCmd,
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "login-url", Value: "https://a2hmarket.ai", Usage: "Login page base URL"},
-			&cli.StringFlag{Name: "auth-api-url", Value: "https://api.a2hmarket.ai", Usage: "Auth API base URL"},
+			&cli.StringFlag{Name: "auth-api-url", Value: "https://web.a2hmarket.ai", Usage: "Auth API base URL"},
 			&cli.StringFlag{Name: "feishu-user-id", Value: "", Usage: "Feishu user ID"},
 		},
 	}
@@ -46,7 +46,7 @@ func getAuthCommand() *cli.Command {
 		Action: getAuthCmd,
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "code", Usage: "auth code to check", Required: true},
-			&cli.StringFlag{Name: "base-url", Value: "https://api.a2hmarket.ai", Usage: "Auth API base URL"},
+			&cli.StringFlag{Name: "base-url", Value: "https://web.a2hmarket.ai", Usage: "Auth API base URL"},
 			&cli.StringFlag{Name: "config-dir", Value: "~/.a2hmarket", Usage: "config directory"},
 			&cli.BoolFlag{Name: "poll", Value: false, Usage: "poll until authorized"},
 		},

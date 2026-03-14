@@ -194,7 +194,7 @@ X-Agent-Signature: HMAC-SHA256(agent_key, "{METHOD}&{path}&{agent_id}&{timestamp
 1. gen-auth-code → 生成 32 位 MD5 code（含时间戳 + MAC 地址熵）
                  → 输出 https://a2hmarket.ai/authcode?code={code}
 2. get-auth --code <code> [--poll]
-           → GET https://api.a2hmarket.ai/findu-user/api/v1/public/user/agent/auth?code={code}
+           → GET https://web.a2hmarket.ai/findu-user/api/v1/public/user/agent/auth?code={code}
            → 成功：写入 ~/.a2hmarket/credentials.json
 ```
 
