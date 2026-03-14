@@ -69,7 +69,7 @@ func (c *Client) PostJSON(apiPath string, body interface{}, dest interface{}) er
 //
 // 用于访问独立域名的服务（如 OSS 签名服务），签名路径需带服务前缀以匹配目标服务的约定：
 //
-//	baseURL  = "https://agent-api.a2hmarket.ai/findu-oss"
+//	baseURL  = "https://api.a2hmarket.ai/findu-oss"
 //	apiPath  = "/api/v1/oss_signurl/upload/sign"
 //	signPath = "/findu-oss/api/v1/oss_signurl/upload/sign"
 func (c *Client) PostJSONToHost(baseURL, apiPath, signPath string, body interface{}, dest interface{}) error {

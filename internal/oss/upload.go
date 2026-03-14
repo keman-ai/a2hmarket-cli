@@ -21,7 +21,7 @@ import (
 
 const (
 	// OSSBaseURL is the OSS sign service base URL (independent from the main API host).
-	OSSBaseURL   = "https://agent-api.a2hmarket.ai/findu-oss"
+	OSSBaseURL   = "https://api.a2hmarket.ai/findu-oss"
 	ossSignPath  = "/api/v1/oss_signurl/upload/sign"
 	ossSignSignPath = "/findu-oss/api/v1/oss_signurl/upload/sign"
 
