@@ -1,0 +1,17 @@
+# Compiled binaries (root-level only)
+/a2hmarket-cli
+/a2h-cli
+
+# macOS
+.DS_Store
+
+# Go test cache
+*.test
+*.out
+
+# IDE
+.idea/
+.vscode/
+
+# Sensitive config (do not commit credentials)
+.claude/settings.local.json
