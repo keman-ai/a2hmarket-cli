@@ -245,10 +245,14 @@ func listenerRunCmd(c *cli.Context) error {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	dispatchCfg := dispatcher.A2ADispatchConfig{
+	a2aDispatchCfg := dispatcher.A2ADispatchConfig{
 		BatchSize:  50,
 		MaxRetries: 10,
 		MaxDelayMs: 120_000,
+	}
+	pushDispatchCfg := dispatcher.PushDispatchConfig{
+		BatchSize:  20,
+		MaxDelayMs: 300_000,
 	}
 
 	for {
@@ -276,17 +280,33 @@ func listenerRunCmd(c *cli.Context) error {
 			common.Debugf("heartbeat ok epoch=%d leaseUntil=%d", epoch, leaseUntil)
 
 		case <-flushTicker.C:
-			// Only the leader (or standalone) flushes the A2A outbox.
+			// Only the leader (or standalone) flushes outboxes.
 			if role == lease.RoleFollower {
 				continue
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
-			stats, err := dispatcher.FlushA2AOutbox(ctx, es, a2aSvc.PublishEnvelope, dispatchCfg)
-			cancel()
-			if err != nil {
-				common.Warnf("a2a flush error: %v", err)
-			} else if stats.Sent > 0 || stats.Retried > 0 {
-				common.Infof("a2a flush: sent=%d retried=%d skipped=%d", stats.Sent, stats.Retried, stats.Skipped)
+
+			// Flush A2A outbound messages.
+			{
+				ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+				stats, err := dispatcher.FlushA2AOutbox(ctx, es, a2aSvc.PublishEnvelope, a2aDispatchCfg)
+				cancel()
+				if err != nil {
+					common.Warnf("a2a flush error: %v", err)
+				} else if stats.Sent > 0 || stats.Retried > 0 {
+					common.Infof("a2a flush: sent=%d retried=%d skipped=%d", stats.Sent, stats.Retried, stats.Skipped)
+				}
+			}
+
+			// Flush push_outbox → OpenClaw (only when push_enabled).
+			if pushEnabled {
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				pushStats, err := dispatcher.FlushPushOutbox(ctx, es, pushDispatchCfg)
+				cancel()
+				if err != nil {
+					common.Warnf("push flush error: %v", err)
+				} else if pushStats.Sent > 0 || pushStats.Retried > 0 {
+					common.Infof("push flush: sent=%d retried=%d", pushStats.Sent, pushStats.Retried)
+				}
 			}
 		}
 	}
