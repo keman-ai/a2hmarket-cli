@@ -255,8 +255,11 @@ a2hmarket-cli listener run
 ## 构建与安装
 
 ```bash
-# 直接安装（推荐，无需克隆源码）
-go install github.com/keman-ai/a2hmarket-cli/cmd/a2hmarket-cli@latest
+# 一键安装（自动探测环境，支持国内加速）
+curl -fsSL https://ghproxy.com/https://raw.githubusercontent.com/keman-ai/a2hmarket-cli/main/install.sh | bash
+
+# 有 Go 环境时直接安装
+GOPROXY=https://goproxy.cn,direct go install github.com/keman-ai/a2hmarket-cli/cmd/a2hmarket-cli@latest
 
 # 从源码构建
 make build          # 生成 ./a2hmarket-cli
