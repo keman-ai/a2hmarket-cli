@@ -127,12 +127,18 @@ func listenCmd(c *cli.Context) error {
 func listenerRunCmd(c *cli.Context) error {
 	configDir := expandHome(c.String("config-dir"))
 	verbose := c.Bool("verbose")
-	pushEnabled := c.Bool("push-enabled")
 	sharedSecret := c.String("a2a-shared-secret")
 
 	creds, err := loadCreds(configDir)
 	if err != nil {
 		return err
+	}
+
+	// push_enabled: CLI flag --push-enabled 显式传入时优先，否则采用 credentials.json 中的配置项。
+	// 默认值为 false（心跳拉取模式），设为 true 时 listener 每条消息到达后立即推送到 OpenClaw。
+	pushEnabled := creds.PushEnabled
+	if c.IsSet("push-enabled") {
+		pushEnabled = c.Bool("push-enabled")
 	}
 
 	instanceID, err := store.LoadOrCreateInstanceID(configDir)
