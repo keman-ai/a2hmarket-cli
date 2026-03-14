@@ -114,7 +114,7 @@ func (a *Auth) GetAuth(code string, poll bool, interval int) (*config.Credential
 			}
 			mqttURL := d.MQTTURL
 			if mqttURL == "" {
-				mqttURL = "mqtt://mqtt.a2hmarket.ai:1883"
+				mqttURL = "mqtts://post-cn-e4k4o78q702.mqtt.aliyuncs.com:8883"
 			}
 
 			creds := &config.Credentials{

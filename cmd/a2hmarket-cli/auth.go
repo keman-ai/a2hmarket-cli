@@ -354,7 +354,7 @@ func apiCallCmd(c *cli.Context) error {
 
 const (
 	defaultAPIURL  = "https://api.a2hmarket.ai"
-	defaultMQTTURL = "mqtt://mqtt.a2hmarket.ai:1883"
+	defaultMQTTURL = "mqtts://post-cn-e4k4o78q702.mqtt.aliyuncs.com:8883"
 )
 
 func saveCredentials(dir string, creds *auth.Credentials) error {
