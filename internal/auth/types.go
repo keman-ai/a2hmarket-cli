@@ -19,43 +19,26 @@ type CheckAuthRequest struct {
 	Code string `json:"code"`
 }
 
-// CheckAuthResponse 检查鉴权响应（支持嵌套credentials结构）
+// CheckAuthResponse 服务器返回通用格式：
+//
+//	{"code":"200","message":"OK"}          — pending（等待用户授权）
+//	{"code":"200","message":"OK","data":{}} — authorized（已授权，data 含凭证）
+//	{"code":"4xx","message":"..."}          — 错误（code 过期/不存在等）
 type CheckAuthResponse struct {
-	Status      string       `json:"status"`
-	Credentials *Credentials `json:"credentials,omitempty"`
-	AgentID     string       `json:"agent_id,omitempty"`
-	AgentKey    string       `json:"agent_key,omitempty"`
-	APIURL      string       `json:"api_url,omitempty"`
-	MQTTURL     string       `json:"mqtt_url,omitempty"`
-	ExpireAt    string       `json:"expire_at,omitempty"`
-	Error       string       `json:"error,omitempty"`
+	Code    string       `json:"code"`
+	Message string       `json:"message"`
+	Data    *Credentials `json:"data,omitempty"`
 }
 
-// GetCredentials 获取凭证（支持两种响应格式）
-func (r *CheckAuthResponse) GetCredentials() *Credentials {
-	if r.Credentials != nil {
-		return r.Credentials
-	}
-	// 兼容扁平结构
-	return &Credentials{
-		AgentID:  r.AgentID,
-		AgentKey: r.AgentKey,
-		APIURL:   r.APIURL,
-		MQTTURL:  r.MQTTURL,
-		ExpireAt: r.ExpireAt,
-	}
+// IsSuccess 服务器是否返回 200
+func (r *CheckAuthResponse) IsSuccess() bool {
+	return r.Code == "200"
 }
 
-// AuthStatus 鉴权状态
-type AuthStatus string
-
-const (
-	AuthStatusPending     AuthStatus = "pending"
-	AuthStatusAuthorized AuthStatus = "authorized"
-	AuthStatusExpired    AuthStatus = "expired"
-	AuthStatusUsed       AuthStatus = "used"
-	AuthStatusNotFound   AuthStatus = "not_found"
-)
+// IsAuthorized 用户已完成授权（data 字段有凭证）
+func (r *CheckAuthResponse) IsAuthorized() bool {
+	return r.IsSuccess() && r.Data != nil && r.Data.AgentID != ""
+}
 
 // Credentials 凭证信息（鉴权模块使用）
 type Credentials struct {

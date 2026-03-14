@@ -64,7 +64,7 @@ a2hmarket-cli get-auth --code <code> [options]
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `--code` | — | **必填**，`gen-auth-code` 生成的 code |
+| `--code` | — | **必填**，`gen-auth-code` 时候生成的 code |
 | `--base-url` | `https://web.a2hmarket.ai` | 授权 API base URL |
 | `--config-dir` | `~/.a2hmarket` | 凭据写入目录 |
 | `--poll` | `false` | 持续轮询直到授权完成（约30s间隔） |

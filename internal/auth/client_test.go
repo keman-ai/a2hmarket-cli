@@ -87,15 +87,11 @@ func TestInitLogin_InvalidJSON(t *testing.T) {
 	}
 }
 
-// TestCheckAuth_Pending pending 状态
+// TestCheckAuth_Pending pending 状态：code=200，无 data
 func TestCheckAuth_Pending(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/auth/check" {
-			http.Error(w, "not found", http.StatusNotFound)
-			return
-		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(CheckAuthResponse{Status: "pending"})
+		json.NewEncoder(w).Encode(CheckAuthResponse{Code: "200", Message: "OK"})
 	}))
 	defer ts.Close()
 
@@ -104,12 +100,15 @@ func TestCheckAuth_Pending(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CheckAuth() error = %v", err)
 	}
-	if resp.Status != "pending" {
-		t.Errorf("Status = %q, want %q", resp.Status, "pending")
+	if !resp.IsSuccess() {
+		t.Errorf("IsSuccess() = false, want true")
+	}
+	if resp.IsAuthorized() {
+		t.Error("IsAuthorized() = true, want false for pending state")
 	}
 }
 
-// TestCheckAuth_Authorized authorized 状态返回完整凭证
+// TestCheckAuth_Authorized authorized 状态：code=200，data 含完整凭证
 func TestCheckAuth_Authorized(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		code := r.URL.Query().Get("code")
@@ -119,12 +118,15 @@ func TestCheckAuth_Authorized(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(CheckAuthResponse{
-			Status:   "authorized",
-			AgentID:  "ag_t6PowP7DhseW8oBl",
-			AgentKey: "GdLTcvnUbwyDbxZlAy6DKHAa5EeVrN5K",
-			APIURL:   "https://api.a2hmarket.ai",
-			MQTTURL:  "mqtts://mqtt.a2hmarket.ai:8883",
-			ExpireAt: "2027-12-31T23:59:59Z",
+			Code:    "200",
+			Message: "OK",
+			Data: &Credentials{
+				AgentID:  "ag_t6PowP7DhseW8oBl",
+				AgentKey: "GdLTcvnUbwyDbxZlAy6DKHAa5EeVrN5K",
+				APIURL:   "https://api.a2hmarket.ai",
+				MQTTURL:  "mqtts://mqtt.a2hmarket.ai:8883",
+				ExpireAt: "2027-12-31T23:59:59Z",
+			},
 		})
 	}))
 	defer ts.Close()
@@ -134,45 +136,38 @@ func TestCheckAuth_Authorized(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CheckAuth() error = %v", err)
 	}
-	if resp.Status != "authorized" {
-		t.Errorf("Status = %q, want %q", resp.Status, "authorized")
+	if !resp.IsAuthorized() {
+		t.Error("IsAuthorized() = false, want true")
 	}
-	if resp.AgentID != "ag_t6PowP7DhseW8oBl" {
-		t.Errorf("AgentID = %q, want %q", resp.AgentID, "ag_t6PowP7DhseW8oBl")
+	if resp.Data.AgentID != "ag_t6PowP7DhseW8oBl" {
+		t.Errorf("AgentID = %q, want %q", resp.Data.AgentID, "ag_t6PowP7DhseW8oBl")
 	}
-	if resp.AgentKey != "GdLTcvnUbwyDbxZlAy6DKHAa5EeVrN5K" {
-		t.Errorf("AgentKey = %q, want %q", resp.AgentKey, "GdLTcvnUbwyDbxZlAy6DKHAa5EeVrN5K")
+	if resp.Data.AgentKey != "GdLTcvnUbwyDbxZlAy6DKHAa5EeVrN5K" {
+		t.Errorf("AgentKey = %q, want %q", resp.Data.AgentKey, "GdLTcvnUbwyDbxZlAy6DKHAa5EeVrN5K")
 	}
-	if resp.APIURL != "https://api.a2hmarket.ai" {
-		t.Errorf("APIURL = %q, want %q", resp.APIURL, "https://api.a2hmarket.ai")
+	if resp.Data.APIURL != "https://api.a2hmarket.ai" {
+		t.Errorf("APIURL = %q, want %q", resp.Data.APIURL, "https://api.a2hmarket.ai")
 	}
-	if resp.ExpireAt != "2027-12-31T23:59:59Z" {
-		t.Errorf("ExpireAt = %q, want %q", resp.ExpireAt, "2027-12-31T23:59:59Z")
+	if resp.Data.ExpireAt != "2027-12-31T23:59:59Z" {
+		t.Errorf("ExpireAt = %q, want %q", resp.Data.ExpireAt, "2027-12-31T23:59:59Z")
 	}
 }
 
-// TestCheckAuth_AllStatuses 各种状态都能正确解析
-func TestCheckAuth_AllStatuses(t *testing.T) {
-	statuses := []string{"pending", "authorized", "expired", "used", "not_found"}
+// TestCheckAuth_ServerError 服务器返回非 200 code
+func TestCheckAuth_ServerError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(CheckAuthResponse{Code: "404", Message: "缺少必需参数: code"})
+	}))
+	defer ts.Close()
 
-	for _, status := range statuses {
-		t.Run(status, func(t *testing.T) {
-			s := status
-			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(CheckAuthResponse{Status: s})
-			}))
-			defer ts.Close()
-
-			client := newTestClient(ts.URL)
-			resp, err := client.CheckAuth("code")
-			if err != nil {
-				t.Fatalf("CheckAuth() error = %v", err)
-			}
-			if resp.Status != s {
-				t.Errorf("Status = %q, want %q", resp.Status, s)
-			}
-		})
+	client := newTestClient(ts.URL)
+	resp, err := client.CheckAuth("code")
+	if err != nil {
+		t.Fatalf("CheckAuth() error = %v", err)
+	}
+	if resp.IsSuccess() {
+		t.Error("IsSuccess() = true, want false for 404 response")
 	}
 }
 

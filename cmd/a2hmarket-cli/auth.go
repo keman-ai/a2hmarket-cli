@@ -197,17 +197,11 @@ func pollForAuth(code, baseURL, configDir string) error {
 		}
 		resp.Body.Close()
 
-		switch authResp.Status {
-		case "pending":
-			fmt.Printf("Attempt %d: Status: pending - waiting for login...\n", attempt)
-			time.Sleep(delay)
-			delay = minDur(delay*2, maxDelay)
-
-		case "authorized":
-			creds := authResp.GetCredentials()
-			if creds == nil {
-				return fmt.Errorf("authorized but no credentials received")
-			}
+		if !authResp.IsSuccess() {
+			return fmt.Errorf("server error (code=%s): %s", authResp.Code, authResp.Message)
+		}
+		if authResp.IsAuthorized() {
+			creds := authResp.Data
 			fmt.Println("Status: authorized")
 			fmt.Printf("Agent ID: %s\n", creds.AgentID)
 			if err := saveCredentials(configDir, creds); err != nil {
@@ -216,18 +210,11 @@ func pollForAuth(code, baseURL, configDir string) error {
 			fmt.Printf("\nCredentials saved to: %s/credentials.json\n", configDir)
 			fmt.Println("Authentication successful!")
 			return nil
-
-		case "expired":
-			return fmt.Errorf("auth code has expired, please re-initiate login")
-		case "used":
-			return fmt.Errorf("auth code already used")
-		case "not_found":
-			return fmt.Errorf("auth code not found")
-		default:
-			fmt.Printf("Attempt %d: Unknown status: %s\n", attempt, authResp.Status)
-			time.Sleep(delay)
-			delay = minDur(delay*2, maxDelay)
 		}
+		// code==200 但 data 为空 → 用户尚未扫码/授权
+		fmt.Printf("Attempt %d: pending - waiting for login...\n", attempt)
+		time.Sleep(delay)
+		delay = minDur(delay*2, maxDelay)
 	}
 	return fmt.Errorf("polling timeout - please try again")
 }
@@ -247,17 +234,11 @@ func checkAuthOnce(code, baseURL, configDir string) error {
 		return fmt.Errorf("failed to parse response: %w", err)
 	}
 
-	switch authResp.Status {
-	case "pending":
-		fmt.Println("Status: pending - Please complete login in PC browser")
-		fmt.Println("Hint: Use --poll flag to wait for authorization")
-		return nil
-
-	case "authorized":
-		creds := authResp.GetCredentials()
-		if creds == nil {
-			return fmt.Errorf("authorized but no credentials received")
-		}
+	if !authResp.IsSuccess() {
+		return fmt.Errorf("server error (code=%s): %s", authResp.Code, authResp.Message)
+	}
+	if authResp.IsAuthorized() {
+		creds := authResp.Data
 		fmt.Println("Status: authorized")
 		fmt.Printf("Agent ID: %s\n", creds.AgentID)
 		fmt.Printf("API URL: %s\n", creds.APIURL)
@@ -268,16 +249,11 @@ func checkAuthOnce(code, baseURL, configDir string) error {
 		fmt.Printf("\nCredentials saved to: %s/credentials.json\n", configDir)
 		fmt.Println("Authentication successful!")
 		return nil
-
-	case "expired":
-		return fmt.Errorf("auth code has expired, please re-initiate login")
-	case "used":
-		return fmt.Errorf("auth code already used")
-	case "not_found":
-		return fmt.Errorf("auth code not found")
-	default:
-		return fmt.Errorf("unknown status: %s", authResp.Status)
 	}
+	// code==200 但 data 为空 → 用户尚未授权
+	fmt.Println("Status: pending - Please complete login in PC browser")
+	fmt.Println("Hint: Use --poll flag to wait for authorization")
+	return nil
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

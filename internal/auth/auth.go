@@ -97,30 +97,29 @@ func (a *Auth) GetAuth(code string, poll bool, interval int) (*config.Credential
 			return nil, err
 		}
 
-		common.Infof("状态: %s", resp.Status)
+		if !resp.IsSuccess() {
+			return nil, common.AuthFailedError(fmt.Sprintf("服务器错误 (code=%s): %s", resp.Code, resp.Message), nil)
+		}
 
-		switch AuthStatus(resp.Status) {
-		case AuthStatusAuthorized:
-			// 解析过期时间
-			expireAt, err := time.Parse(time.RFC3339, resp.ExpireAt)
+		if resp.IsAuthorized() {
+			d := resp.Data
+			expireAt, err := time.Parse(time.RFC3339, d.ExpireAt)
 			if err != nil {
 				common.Warnf("无法解析过期时间，使用默认: %v", err)
 				expireAt = time.Now().AddDate(1, 0, 0)
 			}
 
 			creds := &config.Credentials{
-				AgentID:   resp.AgentID,
-				AgentKey:  resp.AgentKey,
-				APIURL:    resp.APIURL,
-				MQTTURL:   resp.MQTTURL,
+				AgentID:   d.AgentID,
+				AgentKey:  d.AgentKey,
+				APIURL:    d.APIURL,
+				MQTTURL:   d.MQTTURL,
 				ExpireAt:  expireAt,
 				CreatedAt: time.Now(),
 			}
 
-			// 保存凭证
 			credPath := a.config.GetCredentialsPath()
-			err = creds.Save(credPath)
-			if err != nil {
+			if err = creds.Save(credPath); err != nil {
 				return nil, err
 			}
 
@@ -131,27 +130,15 @@ func (a *Auth) GetAuth(code string, poll bool, interval int) (*config.Credential
 			common.Infof("ExpireAt: %s", creds.ExpireAt.Format(time.RFC3339))
 
 			return creds, nil
-
-		case AuthStatusExpired:
-			return nil, common.AuthFailedError("鉴权码已过期", nil)
-
-		case AuthStatusUsed:
-			return nil, common.AuthFailedError("鉴权码已使用", nil)
-
-		case AuthStatusNotFound:
-			return nil, common.AuthFailedError("鉴权码不存在", nil)
-
-		case AuthStatusPending:
-			if !poll {
-				return nil, common.AuthFailedError("等待授权中，请使用 --poll 参数轮询", nil)
-			}
-			common.Infof("等待授权中，%d秒后重试...", interval)
-			time.Sleep(time.Duration(interval) * time.Second)
-			continue
-
-		default:
-			return nil, common.AuthFailedError(fmt.Sprintf("未知状态: %s", resp.Status), nil)
 		}
+
+		// code==200 且 data 为空 → 等待用户授权
+		common.Infof("等待授权中 (pending)...")
+		if !poll {
+			return nil, common.AuthFailedError("等待授权中，请使用 --poll 参数轮询", nil)
+		}
+		common.Infof("%d秒后重试...", interval)
+		time.Sleep(time.Duration(interval) * time.Second)
 	}
 }
 
