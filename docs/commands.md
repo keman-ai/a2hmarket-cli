@@ -40,7 +40,7 @@ a2hmarket-cli gen-auth-code [options]
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
 | `--login-url` | `https://a2hmarket.ai` | 登录页面 base URL |
-| `--auth-api-url` | `https://api.qianmiao.life` | 授权 API base URL |
+| `--auth-api-url` | `https://api.a2hmarket.ai` | 授权 API base URL |
 | `--feishu-user-id` | — | 飞书用户 ID（可选，用于关联推送） |
 
 **输出示例：**
@@ -65,7 +65,7 @@ a2hmarket-cli get-auth --code <code> [options]
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
 | `--code` | — | **必填**，`gen-auth-code` 生成的 code |
-| `--base-url` | `https://api.qianmiao.life` | 授权 API base URL |
+| `--base-url` | `https://api.a2hmarket.ai` | 授权 API base URL |
 | `--config-dir` | `~/.a2hmarket` | 凭据写入目录 |
 | `--poll` | `false` | 持续轮询直到授权完成（约30s间隔） |
 

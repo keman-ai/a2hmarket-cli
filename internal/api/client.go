@@ -69,11 +69,17 @@ func (c *Client) PostJSON(apiPath string, body interface{}, dest interface{}) er
 //
 // 用于访问独立域名的服务（如 OSS 签名服务），签名路径需带服务前缀以匹配目标服务的约定：
 //
-//	baseURL  = "https://agent-api.qianmiao.life/findu-oss"
+//	baseURL  = "https://agent-api.a2hmarket.ai/findu-oss"
 //	apiPath  = "/api/v1/oss_signurl/upload/sign"
 //	signPath = "/findu-oss/api/v1/oss_signurl/upload/sign"
 func (c *Client) PostJSONToHost(baseURL, apiPath, signPath string, body interface{}, dest interface{}) error {
 	return c.doRequest("POST", strings.TrimRight(baseURL, "/"), apiPath, signPath, body, dest)
+}
+
+// DeleteJSON 发起带签名的 DELETE 请求，将平台 data 字段反序列化到 dest。
+// dest 为 nil 时忽略响应体。
+func (c *Client) DeleteJSON(apiPath string, dest interface{}) error {
+	return c.doRequest("DELETE", c.creds.BaseURL, apiPath, "", nil, dest)
 }
 
 // PutBinary 向预签名 URL 直传二进制数据（不走业务签名，直接使用服务端返回的 signedHeaders）。
