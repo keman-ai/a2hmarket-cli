@@ -1,0 +1,48 @@
+# .goreleaser.yaml
+version: 2
+
+project_name: a2hmarket-cli
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    # 针对 macOS 的通用二进制支持
+    ignore:
+      - goos: windows
+        goarch: arm64
+    main: ./cmd/a2hmarket-cli
+    binary: a2hmarket-cli
+
+archives:
+  - format: tar.gz
+    # 这里的命名模版是为了让 install.sh 脚本更容易拼接下载地址
+    name_template: >-
+      {{ .ProjectName }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}
+    # Windows 平台通常使用 .zip
+    format_overrides:
+      - goos: windows
+        format: zip
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  name_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"

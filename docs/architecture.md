@@ -255,10 +255,13 @@ a2hmarket-cli listener run
 ## 构建与安装
 
 ```bash
-# 构建
+# 直接安装（推荐，无需克隆源码）
+go install github.com/keman-ai/a2hmarket-cli/cmd/a2hmarket-cli@latest
+
+# 从源码构建
 make build          # 生成 ./a2hmarket-cli
 
-# 安装到系统 PATH
+# 安装到系统 PATH（从源码）
 make install        # cp ./a2hmarket-cli /usr/local/bin/
 
 # 运行测试
