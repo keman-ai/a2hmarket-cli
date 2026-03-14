@@ -15,37 +15,61 @@ warn()  { echo -e "${YELLOW}[install]${NC} $*"; }
 error() { echo -e "${RED}[install]${NC} $*" >&2; exit 1; }
 
 # ── 将安装目录写入 shell profile ──────────────────────────────
+# 全局变量：记录是否需要提示用户 source
+NEED_SOURCE_PROFILE=""
+SOURCE_PROFILE_PATH=""
+
 add_to_path() {
     local dir="$1"
 
     # 检测当前 shell
-    local profile=""
     local shell_name
     shell_name=$(basename "${SHELL:-bash}")
     case "$shell_name" in
-        zsh)  profile="$HOME/.zshrc" ;;
-        bash) profile="${HOME}/.bashrc" ;;
-        *)    profile="${HOME}/.profile" ;;
+        zsh)  SOURCE_PROFILE_PATH="$HOME/.zshrc" ;;
+        bash) SOURCE_PROFILE_PATH="${HOME}/.bashrc" ;;
+        *)    SOURCE_PROFILE_PATH="${HOME}/.profile" ;;
     esac
 
     local export_line="export PATH=\"\$PATH:${dir}\""
 
-    # 已在 PATH 中则跳过
-    if [[ ":$PATH:" == *":${dir}:"* ]]; then
+    # 已在 PATH 中也打印提示（curl|bash 子进程里 PATH 可能不完整）
+    NEED_SOURCE_PROFILE="$dir"
+
+    # 已写入 profile 则跳过写入，但仍需提示 source
+    if grep -qF "${dir}" "$SOURCE_PROFILE_PATH" 2>/dev/null; then
         return 0
     fi
 
-    # 已写入 profile 则跳过
-    if grep -qF "$export_line" "$profile" 2>/dev/null; then
-        return 0
-    fi
+    echo "" >> "$SOURCE_PROFILE_PATH"
+    echo "# a2hmarket-cli" >> "$SOURCE_PROFILE_PATH"
+    echo "$export_line" >> "$SOURCE_PROFILE_PATH"
+    info "PATH written to ${SOURCE_PROFILE_PATH}"
+}
 
-    echo "" >> "$profile"
-    echo "# a2hmarket-cli" >> "$profile"
-    echo "$export_line" >> "$profile"
-    info "Added to ${profile}: ${export_line}"
-    warn "Run the following to apply immediately:"
-    warn "  source ${profile}"
+# ── 安装完成后的提示 ─────────────────────────────────────────
+print_next_steps() {
+    local dir="$1"
+    echo ""
+    if [[ -n "$NEED_SOURCE_PROFILE" ]]; then
+        echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo -e "${GREEN} Installation complete!${NC}"
+        echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo ""
+        warn "To use ${BINARY} in this terminal, run:"
+        echo ""
+        echo "    export PATH=\"\$PATH:${dir}\""
+        echo ""
+        if [[ -n "$SOURCE_PROFILE_PATH" ]]; then
+            warn "Or open a new terminal (PATH is already saved to ${SOURCE_PROFILE_PATH})."
+        fi
+    else
+        echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo -e "${GREEN} Installation complete!${NC}"
+        echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    fi
+    echo ""
+    info "Run '${BINARY} --help' to get started."
 }
 
 # ── 1. 优先用 go install（开发者路径）────────────────────────
@@ -56,8 +80,7 @@ if command -v go >/dev/null 2>&1; then
     GOBIN=$(go env GOPATH)/bin
     info "✓ ${BINARY} installed → ${GOBIN}/${BINARY}"
     add_to_path "$GOBIN"
-    echo ""
-    info "Run '${BINARY} --help' to get started."
+    print_next_steps "$GOBIN"
     exit 0
 fi
 
@@ -150,5 +173,4 @@ else
     add_to_path "$INSTALL_DIR"
 fi
 
-echo ""
-info "Run '${BINARY} --help' to get started."
+print_next_steps "$INSTALL_DIR"
