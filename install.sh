@@ -5,6 +5,9 @@ REPO="keman-ai/a2hmarket-cli"
 BINARY="a2hmarket-cli"
 PKG="github.com/${REPO}/cmd/${BINARY}"
 
+# 自建代理（最优先，最稳定）；后续 fallback 依次尝试
+A2H_PROXY="https://a2hmarket.ai/github"
+
 # ── 颜色输出 ─────────────────────────────────────────────────
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
 info()  { echo -e "${GREEN}[install]${NC} $*"; }
@@ -14,7 +17,7 @@ error() { echo -e "${RED}[install]${NC} $*" >&2; exit 1; }
 # ── 1. 优先用 go install（开发者路径）────────────────────────
 if command -v go >/dev/null 2>&1; then
     info "Found Go $(go version | awk '{print $3}'), installing via go install..."
-    GOPROXY=https://goproxy.cn,direct go install "${PKG}@latest"
+    GOPROXY="https://goproxy.cn,https://proxy.golang.org,direct" go install "${PKG}@latest"
 
     GOBIN=$(go env GOPATH)/bin
     if [[ ":$PATH:" != *":${GOBIN}:"* ]]; then
@@ -50,24 +53,25 @@ ARCHIVE_EXT="tar.gz"
 
 info "Detected platform: ${OS}/${ARCH}"
 
-# 获取最新 tag（优先用 ghproxy 加速）
+# 获取最新 tag，按代理优先级依次尝试
 GITHUB_API="https://api.github.com/repos/${REPO}/releases/latest"
-GITHUB_API_PROXY="https://ghproxy.com/${GITHUB_API}"
 
 TAG=""
-for api_url in "$GITHUB_API_PROXY" "$GITHUB_API"; do
+for api_url in \
+    "${A2H_PROXY}/repos/${REPO}/releases/latest" \
+    "https://ghproxy.com/${GITHUB_API}" \
+    "$GITHUB_API"; do
     TAG=$(curl -fsSL --connect-timeout 8 "$api_url" 2>/dev/null \
         | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-    [[ -n "$TAG" ]] && break
+    [[ -n "$TAG" ]] && { info "Fetched tag via: $api_url"; break; }
 done
 [[ -z "$TAG" ]] && error "Failed to fetch latest release tag. Please check your network."
 
 info "Latest release: ${TAG}"
 
-# 构造下载 URL（带 ghproxy 加速，失败则回退直连）
+# 构造下载 URL，按代理优先级依次尝试
 FILENAME="${BINARY}_${OS}_${ARCH}.${ARCHIVE_EXT}"
 BASE_URL="https://github.com/${REPO}/releases/download/${TAG}/${FILENAME}"
-PROXY_URL="https://ghproxy.com/${BASE_URL}"
 
 TMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -75,11 +79,19 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 ARCHIVE="${TMP_DIR}/${FILENAME}"
 
 info "Downloading ${FILENAME}..."
-if ! curl -fsSL --connect-timeout 15 -o "$ARCHIVE" "$PROXY_URL"; then
-    warn "ghproxy failed, trying direct download..."
-    curl -fsSL --connect-timeout 30 -o "$ARCHIVE" "$BASE_URL" \
-        || error "Download failed. Please visit: https://github.com/${REPO}/releases"
-fi
+DOWNLOADED=false
+for download_url in \
+    "${A2H_PROXY}/${REPO}/releases/download/${TAG}/${FILENAME}" \
+    "https://ghproxy.com/${BASE_URL}" \
+    "$BASE_URL"; do
+    if curl -fsSL --connect-timeout 15 -o "$ARCHIVE" "$download_url" 2>/dev/null; then
+        info "Downloaded via: $download_url"
+        DOWNLOADED=true
+        break
+    fi
+    warn "Failed: $download_url"
+done
+$DOWNLOADED || error "All download sources failed. Please visit: https://github.com/${REPO}/releases"
 
 # 解压
 info "Extracting..."
