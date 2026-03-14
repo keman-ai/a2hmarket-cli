@@ -202,8 +202,16 @@ func pollForAuth(code, baseURL, configDir string) error {
 		}
 		if authResp.IsAuthorized() {
 			creds := authResp.Data
+			if creds.APIURL == "" {
+				creds.APIURL = defaultAPIURL
+			}
+			if creds.MQTTURL == "" {
+				creds.MQTTURL = defaultMQTTURL
+			}
 			fmt.Println("Status: authorized")
 			fmt.Printf("Agent ID: %s\n", creds.AgentID)
+			fmt.Printf("API URL:  %s\n", creds.APIURL)
+			fmt.Printf("MQTT URL: %s\n", creds.MQTTURL)
 			if err := saveCredentials(configDir, creds); err != nil {
 				return fmt.Errorf("failed to save credentials: %w", err)
 			}
@@ -239,9 +247,16 @@ func checkAuthOnce(code, baseURL, configDir string) error {
 	}
 	if authResp.IsAuthorized() {
 		creds := authResp.Data
+		// 先补默认值再打印，保持显示与保存一致
+		if creds.APIURL == "" {
+			creds.APIURL = defaultAPIURL
+		}
+		if creds.MQTTURL == "" {
+			creds.MQTTURL = defaultMQTTURL
+		}
 		fmt.Println("Status: authorized")
 		fmt.Printf("Agent ID: %s\n", creds.AgentID)
-		fmt.Printf("API URL: %s\n", creds.APIURL)
+		fmt.Printf("API URL:  %s\n", creds.APIURL)
 		fmt.Printf("MQTT URL: %s\n", creds.MQTTURL)
 		if err := saveCredentials(configDir, creds); err != nil {
 			return fmt.Errorf("failed to save credentials: %w", err)
