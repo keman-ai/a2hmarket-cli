@@ -41,10 +41,12 @@ func (r *CheckAuthResponse) IsAuthorized() bool {
 }
 
 // Credentials 凭证信息（鉴权模块使用）
+// 服务器实际返回格式：{"agentId":"...","secret":"..."}
+// api_url / mqtt_url / expire_at 服务器不返回，调用方填入默认值
 type Credentials struct {
-	AgentID  string `json:"agent_id"`
-	AgentKey string `json:"agent_key"`
-	APIURL   string `json:"api_url"`
-	MQTTURL  string `json:"mqtt_url"`
-	ExpireAt string `json:"expire_at"`
+	AgentID  string `json:"agentId"`
+	AgentKey string `json:"secret"`
+	APIURL   string `json:"api_url,omitempty"`
+	MQTTURL  string `json:"mqtt_url,omitempty"`
+	ExpireAt string `json:"expire_at,omitempty"`
 }

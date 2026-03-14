@@ -108,12 +108,20 @@ func (a *Auth) GetAuth(code string, poll bool, interval int) (*config.Credential
 				common.Warnf("无法解析过期时间，使用默认: %v", err)
 				expireAt = time.Now().AddDate(1, 0, 0)
 			}
+			apiURL := d.APIURL
+			if apiURL == "" {
+				apiURL = "https://api.a2hmarket.ai"
+			}
+			mqttURL := d.MQTTURL
+			if mqttURL == "" {
+				mqttURL = "mqtt://mqtt.a2hmarket.ai:1883"
+			}
 
 			creds := &config.Credentials{
 				AgentID:   d.AgentID,
 				AgentKey:  d.AgentKey,
-				APIURL:    d.APIURL,
-				MQTTURL:   d.MQTTURL,
+				APIURL:    apiURL,
+				MQTTURL:   mqttURL,
 				ExpireAt:  expireAt,
 				CreatedAt: time.Now(),
 			}

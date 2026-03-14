@@ -31,11 +31,8 @@ func TestCheckAuthResponse_IsAuthorized(t *testing.T) {
 			Code:    "200",
 			Message: "OK",
 			Data: &Credentials{
-				AgentID:  "ag_xxx",
-				AgentKey: "key_xxx",
-				APIURL:   "https://api.a2hmarket.ai",
-				MQTTURL:  "mqtts://mqtt.a2hmarket.ai:8883",
-				ExpireAt: "2027-12-31T23:59:59Z",
+				AgentID:  "ag_xxx",  // mapped from JSON "agentId"
+				AgentKey: "key_xxx", // mapped from JSON "secret"
 			},
 		}
 		if !resp.IsAuthorized() {

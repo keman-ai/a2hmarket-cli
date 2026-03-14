@@ -117,15 +117,13 @@ func TestCheckAuth_Authorized(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(CheckAuthResponse{
-			Code:    "200",
-			Message: "OK",
-			Data: &Credentials{
-				AgentID:  "ag_t6PowP7DhseW8oBl",
-				AgentKey: "GdLTcvnUbwyDbxZlAy6DKHAa5EeVrN5K",
-				APIURL:   "https://api.a2hmarket.ai",
-				MQTTURL:  "mqtts://mqtt.a2hmarket.ai:8883",
-				ExpireAt: "2027-12-31T23:59:59Z",
+		// 模拟服务器实际返回格式（camelCase agentId/secret）
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"code":    "200",
+			"message": "OK",
+			"data": map[string]string{
+				"agentId": "ag_t6PowP7DhseW8oBl",
+				"secret":  "GdLTcvnUbwyDbxZlAy6DKHAa5EeVrN5K",
 			},
 		})
 	}))
@@ -144,12 +142,6 @@ func TestCheckAuth_Authorized(t *testing.T) {
 	}
 	if resp.Data.AgentKey != "GdLTcvnUbwyDbxZlAy6DKHAa5EeVrN5K" {
 		t.Errorf("AgentKey = %q, want %q", resp.Data.AgentKey, "GdLTcvnUbwyDbxZlAy6DKHAa5EeVrN5K")
-	}
-	if resp.Data.APIURL != "https://api.a2hmarket.ai" {
-		t.Errorf("APIURL = %q, want %q", resp.Data.APIURL, "https://api.a2hmarket.ai")
-	}
-	if resp.Data.ExpireAt != "2027-12-31T23:59:59Z" {
-		t.Errorf("ExpireAt = %q, want %q", resp.Data.ExpireAt, "2027-12-31T23:59:59Z")
 	}
 }
 

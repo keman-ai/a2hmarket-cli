@@ -337,15 +337,28 @@ func apiCallCmd(c *cli.Context) error {
 // Local helpers (auth-specific)
 // ─────────────────────────────────────────────────────────────────────────────
 
+const (
+	defaultAPIURL  = "https://api.a2hmarket.ai"
+	defaultMQTTURL = "mqtt://mqtt.a2hmarket.ai:1883"
+)
+
 func saveCredentials(dir string, creds *auth.Credentials) error {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
+	apiURL := creds.APIURL
+	if apiURL == "" {
+		apiURL = defaultAPIURL
+	}
+	mqttURL := creds.MQTTURL
+	if mqttURL == "" {
+		mqttURL = defaultMQTTURL
+	}
 	configData := config.CredentialsConfig{
 		AgentID:   creds.AgentID,
 		AgentKey:  creds.AgentKey,
-		APIURL:    creds.APIURL,
-		MQTTURL:   creds.MQTTURL,
+		APIURL:    apiURL,
+		MQTTURL:   mqttURL,
 		ExpiresAt: creds.ExpireAt,
 	}
 	data, err := json.MarshalIndent(configData, "", "  ")
