@@ -124,7 +124,7 @@ func genAuthCodeCmd(c *cli.Context) error {
 	}
 
 	fmt.Printf("Auth code generated: %s\n", loginResp.Code)
-	fmt.Printf("Login URL: %s\n", loginResp.URL)
+	fmt.Printf("Login URL:\n%s\n", loginResp.URL)
 	fmt.Printf("Timestamp: %d\n", timestamp)
 	fmt.Printf("MAC Address: %s\n", macAddr)
 	fmt.Println("\nPlease open the URL in PC browser to complete login")
@@ -144,7 +144,7 @@ func generateLocalAuthCode(loginURL string, timestamp int64, macAddr string) err
 	url := fmt.Sprintf("%s/authcode?code=%s", loginURL, authCode)
 
 	fmt.Printf("Auth code generated: %s\n", authCode)
-	fmt.Printf("Login URL: %s\n", url)
+	fmt.Printf("Login URL:\n%s\n", url)
 	fmt.Printf("Raw string (before MD5): %s\n", rawString)
 	fmt.Println("\nPlease open the URL in PC browser to complete login")
 	fmt.Println("Then run 'a2hmarket-cli get-auth --code <code>' to fetch credentials")
