@@ -62,15 +62,21 @@ func FlushPushOutbox(ctx context.Context, es *store.EventStore, cfg PushDispatch
 		text := openclaw.FormatPushText(row)
 		sendErr := openclaw.SendToSession(sessionID, text)
 
+		// Use a fresh background context for DB writes: the openclaw agent command
+		// may take several seconds, potentially exhausting the caller's deadline
+		// before we can persist the outcome.
+		dbCtx, dbCancel := context.WithTimeout(context.Background(), 5*time.Second)
+
 		if sendErr == nil {
 			// Mark SENT; ack deadline = now + 15 s (simple, no consumer ACK needed here)
 			ackDeadline := time.Now().UnixMilli() + 15_000
-			if err := es.MarkPushSent(ctx, row.OutboxID, row.EventID, ackDeadline); err != nil {
+			if err := es.MarkPushSent(dbCtx, row.OutboxID, row.EventID, ackDeadline); err != nil {
 				common.Warnf("push: mark sent failed event_id=%s: %v", row.EventID, err)
 			} else {
 				common.Infof("push: delivered event_id=%s session=%s", row.EventID, sessionID)
 				stats.Sent++
 			}
+			dbCancel()
 			continue
 		}
 
@@ -78,9 +84,10 @@ func FlushPushOutbox(ctx context.Context, es *store.EventStore, cfg PushDispatch
 		nextAttempt := row.Attempt + 1
 		delayMs := CalculateBackoffMs(nextAttempt, int64(cfg.MaxDelayMs))
 		nextRetryAt := time.Now().UnixMilli() + delayMs
-		if err := es.MarkPushRetry(ctx, row.OutboxID, nextAttempt, nextRetryAt, sendErr.Error()); err != nil {
+		if err := es.MarkPushRetry(dbCtx, row.OutboxID, nextAttempt, nextRetryAt, sendErr.Error()); err != nil {
 			common.Warnf("push: mark retry failed event_id=%s: %v", row.EventID, err)
 		}
+		dbCancel()
 		common.Warnf("push: delivery failed event_id=%s attempt=%d retry_in_ms=%d: %v",
 			row.EventID, nextAttempt, int(delayMs), sendErr)
 		stats.Retried++
