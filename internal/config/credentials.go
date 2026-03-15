@@ -17,20 +17,21 @@ type Credentials struct {
 	ExpireAt    time.Time `json:"expire_at"`
 	CreatedAt   time.Time `json:"created_at"`
 	// PushEnabled 控制 listener 是否在收到消息时主动推送到 OpenClaw。
-	// 默认 false：仅在心跳时由 OpenClaw 主动拉取（pull 模式）。
-	// 设为 true：每条消息到达后立即推送到 OpenClaw（push 模式）。
+	// 默认 true：每条消息到达后立即推送到 OpenClaw（push 模式）。
+	// 设为 false：仅在心跳时由 OpenClaw 主动拉取（pull 模式）。
 	PushEnabled bool `json:"push_enabled"`
 }
 
 // CredentialsConfig 凭证配置（用于JSON持久化）
+// PushEnabled 使用指针类型以区分"未设置"（默认 true）和"显式 false"。
 type CredentialsConfig struct {
-	AgentID     string `json:"agent_id"`
-	AgentKey    string `json:"agent_key"`
-	APIURL      string `json:"api_url"`
-	MQTTURL     string `json:"mqtt_url"`
-	ExpiresAt   string `json:"expires_at"`
-	// PushEnabled 控制消息推送模式，默认 false（心跳拉取）。
-	PushEnabled bool   `json:"push_enabled"`
+	AgentID     string  `json:"agent_id"`
+	AgentKey    string  `json:"agent_key"`
+	APIURL      string  `json:"api_url"`
+	MQTTURL     string  `json:"mqtt_url"`
+	ExpiresAt   string  `json:"expires_at"`
+	// PushEnabled 控制消息推送模式。nil 或缺失时默认 true（即时推送）。
+	PushEnabled *bool   `json:"push_enabled,omitempty"`
 }
 
 // IsExpired 检查凭证是否过期
@@ -71,13 +72,17 @@ func LoadCredentials(path string) (*Credentials, error) {
 		return nil, common.CredentialError("解析凭证文件失败", err)
 	}
 
-	// 转换
+	// 转换：PushEnabled 未设置时默认 true（即时推送模式）
+	pushEnabled := true
+	if credsConfig.PushEnabled != nil {
+		pushEnabled = *credsConfig.PushEnabled
+	}
 	creds := &Credentials{
 		AgentID:     credsConfig.AgentID,
 		AgentKey:    credsConfig.AgentKey,
 		APIURL:      credsConfig.APIURL,
 		MQTTURL:     credsConfig.MQTTURL,
-		PushEnabled: credsConfig.PushEnabled,
+		PushEnabled: pushEnabled,
 	}
 
 	if credsConfig.ExpiresAt != "" {
