@@ -14,6 +14,32 @@ info()  { echo -e "${GREEN}[install]${NC} $*"; }
 warn()  { echo -e "${YELLOW}[install]${NC} $*"; }
 error() { echo -e "${RED}[install]${NC} $*" >&2; exit 1; }
 
+# ── 安装前：先停掉托管服务再杀进程，避免 launchd/systemd 立刻拉起旧进程 ─
+stop_listener_before_install() {
+    case "$(uname -s)" in
+        Darwin)
+            local plist="$HOME/Library/LaunchAgents/ai.a2hmarket.listener.plist"
+            if [[ -f "$plist" ]]; then
+                launchctl unload "$plist" 2>/dev/null && info "Unloaded LaunchAgent (old listener stopped)." || true
+            fi
+            ;;
+        Linux)
+            if command -v systemctl >/dev/null 2>&1; then
+                systemctl --user stop a2hmarket-listener.service 2>/dev/null && info "Stopped systemd user service (old listener)." || true
+            fi
+            ;;
+    esac
+    # 再杀残留进程（非托管启动的旧进程或旧名 a2hmarket）
+    if pgrep -f "${BINARY} listener run" >/dev/null 2>&1; then
+        pkill -f "${BINARY} listener run" 2>/dev/null || true
+        sleep 1
+    fi
+    if pgrep -x "a2hmarket" >/dev/null 2>&1; then
+        pkill -x "a2hmarket" 2>/dev/null || true
+        info "Stopped legacy 'a2hmarket' process."
+    fi
+}
+
 # ── 将安装目录写入 shell profile ──────────────────────────────
 # 全局变量：记录是否需要提示用户 source
 NEED_SOURCE_PROFILE=""
@@ -47,6 +73,106 @@ add_to_path() {
     info "PATH written to ${SOURCE_PROFILE_PATH}"
 }
 
+# ── 安装 listener 为系统/用户服务（macOS launchd / Linux systemd）────────
+# 传入：二进制绝对路径、配置目录。无凭证时仍写入 unit，不自动 start，避免反复报错。
+install_listener_service() {
+    local bin="$1"
+    local config_dir="${2:-$HOME/.a2hmarket}"
+    local log_path="$config_dir/store/listener.log"
+    [[ -z "$bin" || ! -x "$bin" ]] && return 0
+    mkdir -p "$config_dir/store"
+
+    case "$(uname -s)" in
+        Darwin)
+            local plist_dir="$HOME/Library/LaunchAgents"
+            local plist_path="$plist_dir/ai.a2hmarket.listener.plist"
+            mkdir -p "$plist_dir"
+            cat > "$plist_path" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>ai.a2hmarket.listener</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$bin</string>
+        <string>listener</string>
+        <string>run</string>
+        <string>--config-dir</string>
+        <string>$config_dir</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>$log_path</string>
+    <key>StandardErrorPath</key>
+    <string>$log_path</string>
+</dict>
+</plist>
+EOF
+            info "LaunchAgent installed: $plist_path"
+            if [[ -f "$config_dir/credentials.json" ]]; then
+                launchctl unload "$plist_path" 2>/dev/null || true
+                launchctl load "$plist_path" 2>/dev/null && info "Listener service loaded (log: $log_path)." || warn "launchctl load failed; run: launchctl load $plist_path"
+            else
+                warn "No credentials yet. After '${BINARY} get-auth', run: launchctl load $plist_path"
+            fi
+            ;;
+        Linux)
+            local unit_dir="$HOME/.config/systemd/user"
+            local unit_path="$unit_dir/a2hmarket-listener.service"
+            mkdir -p "$unit_dir"
+            cat > "$unit_path" << EOF
+[Unit]
+Description=a2hmarket-cli listener
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=\"$bin\" listener run --config-dir \"$config_dir\"
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:$log_path
+StandardError=append:$log_path
+
+[Install]
+WantedBy=default.target
+EOF
+            info "Systemd user unit installed: $unit_path"
+            if command -v systemctl >/dev/null 2>&1; then
+                systemctl --user daemon-reload 2>/dev/null || true
+                if [[ -f "$config_dir/credentials.json" ]]; then
+                    systemctl --user enable --now a2hmarket-listener.service 2>/dev/null && info "Listener service enabled and started (log: $log_path)." || warn "systemctl --user start failed; run: systemctl --user enable --now a2hmarket-listener.service"
+                else
+                    warn "No credentials yet. After '${BINARY} get-auth', run: systemctl --user enable --now a2hmarket-listener.service"
+                fi
+                info "To run listener at boot without login: loginctl enable-linger \$USER"
+            else
+                warn "systemctl not found; start manually: $bin listener run --config-dir $config_dir"
+            fi
+            # 可选：若使用 supervisord，可 include 此片段
+            cat > "$config_dir/supervisord-listener.conf.sample" << SUPEOF
+; Include in supervisord.conf (e.g. under [include] files=...)
+[program:a2hmarket-listener]
+command=$bin listener run --config-dir $config_dir
+directory=$HOME
+autostart=true
+autorestart=true
+stdout_logfile=$log_path
+stderr_logfile=$log_path
+SUPEOF
+            info "Supervisord sample: $config_dir/supervisord-listener.conf.sample"
+            ;;
+        *)
+            return 0
+            ;;
+    esac
+}
+
 # ── 安装完成后的提示 ─────────────────────────────────────────
 print_next_steps() {
     local dir="$1"
@@ -72,6 +198,9 @@ print_next_steps() {
     info "Run '${BINARY} --help' to get started."
 }
 
+# 安装前先停掉托管服务并杀旧进程，再装新二进制、写新 unit 并 load/start
+stop_listener_before_install
+
 # ── 1. 优先用 go install（开发者路径）────────────────────────
 if command -v go >/dev/null 2>&1; then
     info "Found Go $(go version | awk '{print $3}'), installing via go install..."
@@ -81,6 +210,7 @@ if command -v go >/dev/null 2>&1; then
     info "✓ ${BINARY} installed → ${GOBIN}/${BINARY}"
     add_to_path "$GOBIN"
     print_next_steps "$GOBIN"
+    install_listener_service "${GOBIN}/${BINARY}" "$HOME/.a2hmarket"
     exit 0
 fi
 
@@ -174,3 +304,4 @@ else
 fi
 
 print_next_steps "$INSTALL_DIR"
+install_listener_service "${INSTALL_DIR}/${BINARY}" "$HOME/.a2hmarket"

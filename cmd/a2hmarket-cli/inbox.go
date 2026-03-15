@@ -95,6 +95,7 @@ func inboxCommand() *cli.Command {
 
 func inboxPullCmd(c *cli.Context) error {
 	configDir := expandHome(c.String("config-dir"))
+	ensureListenerRunning(configDir)
 	consumerID := normalizeStr(c.String("consumer-id"), "default")
 	cursor := c.Int64("cursor")
 	limit := clamp(c.Int("limit"), 1, 200, 20)
