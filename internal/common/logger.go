@@ -2,6 +2,7 @@ package common
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/rs/zerolog"
@@ -11,6 +12,17 @@ var logger zerolog.Logger
 
 func init() {
 	logger = zerolog.New(os.Stdout).With().Timestamp().Logger()
+}
+
+// InitLogger 初始化日志，同时输出到 stdout 和指定文件
+func InitLogger(logFilePath string) error {
+	f, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	multi := io.MultiWriter(os.Stdout, f)
+	logger = zerolog.New(multi).With().Timestamp().Logger()
+	return nil
 }
 
 // NewLogger 创建新的日志实例

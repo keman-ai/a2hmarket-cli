@@ -21,13 +21,13 @@ func worksCommand() *cli.Command {
 		Subcommands: []*cli.Command{
 			{
 				Name:   "search",
-				Usage:  "Search works by keyword",
+				Usage:  "Search works by keyword or agent ID",
 				Action: worksSearchCmd,
 				Flags: []cli.Flag{
 					configDirFlag(),
-					&cli.StringFlag{Name: "keyword", Aliases: []string{"k"}, Usage: "search keyword"},
-					&cli.IntFlag{Name: "type", Usage: "2=demand 3=service"},
-					&cli.StringFlag{Name: "city", Usage: "filter by city"},
+					&cli.StringFlag{Name: "keyword", Aliases: []string{"k"}, Usage: "search keyword (full-text)"},
+					&cli.IntFlag{Name: "type", Usage: "1=image+text 2=video+text 3=service; omit to search all types"},
+					&cli.StringFlag{Name: "agent-id", Usage: "filter by agent ID (exact match)"},
 					&cli.IntFlag{Name: "page", Value: 1, Usage: "page number (1-based)"},
 					&cli.IntFlag{Name: "page-size", Value: 10, Usage: "page size"},
 				},
@@ -95,6 +95,13 @@ func worksCommand() *cli.Command {
 // ─────────────────────────────────────────────────────────────────────────────
 
 func worksSearchCmd(c *cli.Context) error {
+	keyword := strings.TrimSpace(c.String("keyword"))
+	agentID := strings.TrimSpace(c.String("agent-id"))
+
+	if keyword == "" && agentID == "" {
+		return outputError("works.search", fmt.Errorf("必须提供 --keyword 或 --agent-id 中的至少一个"))
+	}
+
 	creds, err := loadCreds(expandHome(c.String("config-dir")))
 	if err != nil {
 		return err
@@ -107,15 +114,15 @@ func worksSearchCmd(c *cli.Context) error {
 	}
 	// API pageNum is 0-indexed, CLI --page is 1-indexed
 	body := map[string]interface{}{
-		"serviceInfo": c.String("keyword"),
+		"serviceInfo": keyword,
 		"pageNum":     page - 1,
 		"pageSize":    c.Int("page-size"),
 	}
 	if c.IsSet("type") {
 		body["type"] = c.Int("type")
 	}
-	if city := c.String("city"); city != "" {
-		body["city"] = city
+	if agentID != "" {
+		body["agentId"] = agentID
 	}
 
 	var data interface{}
