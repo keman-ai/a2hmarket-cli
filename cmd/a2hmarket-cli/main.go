@@ -11,7 +11,7 @@ func main() {
 	app := &cli.App{
 		Name:    "a2hmarket-cli",
 		Usage:   "a2hmarket CLI — authentication, messaging and listener daemon",
-		Version: "0.3.0",
+		Version: "0.1.2",
 		Commands: []*cli.Command{
 			genAuthCodeCommand(),
 			getAuthCommand(),

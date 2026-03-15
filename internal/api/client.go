@@ -179,7 +179,7 @@ func (c *Client) doRequest(method, baseURL, apiPath, signPath string, body inter
 		if msg == "" {
 			msg = string(rawBody)
 		}
-		code := pr.Code
+		code := pr.codeString()
 		if code == "" {
 			code = strconv.Itoa(resp.StatusCode)
 		}
@@ -187,8 +187,9 @@ func (c *Client) doRequest(method, baseURL, apiPath, signPath string, body inter
 	}
 
 	// 解析平台统一响应
+	// Code 用 json.RawMessage 以兼容服务端返回整数 200 或字符串 "200" 两种格式。
 	var wrapper struct {
-		Code    string          `json:"code"`
+		Code    json.RawMessage `json:"code"`
 		Message string          `json:"message"`
 		Data    json.RawMessage `json:"data"`
 	}
@@ -202,9 +203,11 @@ func (c *Client) doRequest(method, baseURL, apiPath, signPath string, body inter
 		return nil
 	}
 
+	// 归一化 code：去掉引号后比较（兼容 "200" 和 200 两种格式）
+	codeStr := strings.Trim(string(wrapper.Code), `"`)
 	// 平台业务错误（code 非 "200"）
-	if wrapper.Code != "" && wrapper.Code != "200" {
-		return newPlatformError(wrapper.Code, wrapper.Message, 0)
+	if codeStr != "" && codeStr != "200" {
+		return newPlatformError(codeStr, wrapper.Message, 0)
 	}
 
 	// 反序列化 data 字段到 dest
