@@ -22,11 +22,12 @@ type PushStats struct {
 	Skipped int
 }
 
-// FlushPushOutbox reads pending push_outbox rows and delivers them to OpenClaw
-// via `openclaw sessions --json` + `openclaw agent --session-id <id> --message <msg>`.
+// FlushPushOutbox reads pending push_outbox rows and delivers them to OpenClaw.
 //
-// Session discovery is best-effort: the first session returned by `openclaw sessions`
-// (ordered by updatedAt desc) is used as the push target.
+// Each row is dispatched in its own goroutine so that slow openclaw agent
+// calls (which involve an LLM round-trip of 30-120 s) do NOT block the
+// caller's heartbeat ticker.  The caller's context is only used for the
+// initial DB read; individual delivery goroutines use independent contexts.
 func FlushPushOutbox(ctx context.Context, es *store.EventStore, cfg PushDispatchConfig) (PushStats, error) {
 	if cfg.BatchSize <= 0 {
 		cfg.BatchSize = 20
@@ -45,13 +46,13 @@ func FlushPushOutbox(ctx context.Context, es *store.EventStore, cfg PushDispatch
 		return PushStats{}, nil
 	}
 
-	// Resolve the target session once per flush (avoids repeated subprocess calls).
-	sessionID, sessErr := openclaw.GetMostRecentSessionID()
+	session, sessErr := openclaw.GetMostRecentSession()
 	if sessErr != nil {
 		common.Warnf("push: cannot resolve openclaw session: %v", sessErr)
-		// Don't retry individual rows yet; wait for the next tick.
 		return PushStats{}, nil
 	}
+
+	channel, target := openclaw.ParseSessionKey(session.Key)
 
 	var stats PushStats
 	for _, row := range rows {
@@ -59,39 +60,90 @@ func FlushPushOutbox(ctx context.Context, es *store.EventStore, cfg PushDispatch
 			break
 		}
 
-		text := openclaw.FormatPushText(row)
-		sendErr := openclaw.SendToSession(sessionID, text)
-
-		// Use a fresh background context for DB writes: the openclaw agent command
-		// may take several seconds, potentially exhausting the caller's deadline
-		// before we can persist the outcome.
+		// Mark in-flight immediately so the next flush tick doesn't pick it
+		// up again while the goroutine is still waiting for OpenClaw.
+		// We use status=SENT with a generous ack deadline; the goroutine will
+		// update it to SENT (on success) or RETRY (on failure) when done.
+		inflight := time.Now().UnixMilli() + int64(cfg.MaxDelayMs)
 		dbCtx, dbCancel := context.WithTimeout(context.Background(), 5*time.Second)
-
-		if sendErr == nil {
-			// Mark SENT; ack deadline = now + 15 s (simple, no consumer ACK needed here)
-			ackDeadline := time.Now().UnixMilli() + 15_000
-			if err := es.MarkPushSent(dbCtx, row.OutboxID, row.EventID, ackDeadline); err != nil {
-				common.Warnf("push: mark sent failed event_id=%s: %v", row.EventID, err)
-			} else {
-				common.Infof("push: delivered event_id=%s session=%s", row.EventID, sessionID)
-				stats.Sent++
-			}
+		if err := es.MarkPushSent(dbCtx, row.OutboxID, row.EventID, inflight); err != nil {
 			dbCancel()
+			common.Warnf("push: mark inflight failed event_id=%s: %v", row.EventID, err)
 			continue
 		}
-
-		// Delivery failed — schedule retry with exponential backoff.
-		nextAttempt := row.Attempt + 1
-		delayMs := CalculateBackoffMs(nextAttempt, int64(cfg.MaxDelayMs))
-		nextRetryAt := time.Now().UnixMilli() + delayMs
-		if err := es.MarkPushRetry(dbCtx, row.OutboxID, nextAttempt, nextRetryAt, sendErr.Error()); err != nil {
-			common.Warnf("push: mark retry failed event_id=%s: %v", row.EventID, err)
-		}
 		dbCancel()
-		common.Warnf("push: delivery failed event_id=%s attempt=%d retry_in_ms=%d: %v",
-			row.EventID, nextAttempt, int(delayMs), sendErr)
-		stats.Retried++
+
+		rowCopy := row
+		sessCopy := session
+		go dispatchAsync(es, rowCopy, sessCopy, channel, target, cfg)
+		stats.Sent++
 	}
 
 	return stats, nil
+}
+
+// dispatchAsync runs in a goroutine per message.  It calls openclaw (slow),
+// then updates the DB with the outcome.
+func dispatchAsync(es *store.EventStore, row store.PushOutboxRow, session *openclaw.Session, channel, target string, cfg PushDispatchConfig) {
+	sendErr := dispatchRow(row, session, channel, target)
+
+	dbCtx, dbCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer dbCancel()
+
+	if sendErr == nil {
+		ackDeadline := time.Now().UnixMilli() + 15_000
+		if err := es.MarkPushSent(dbCtx, row.OutboxID, row.EventID, ackDeadline); err != nil {
+			common.Warnf("push: mark sent failed event_id=%s: %v", row.EventID, err)
+		} else {
+			common.Infof("push: delivered event_id=%s session=%s", row.EventID, session.SessionID)
+		}
+		return
+	}
+
+	nextAttempt := row.Attempt + 1
+	delayMs := CalculateBackoffMs(nextAttempt, int64(cfg.MaxDelayMs))
+	nextRetryAt := time.Now().UnixMilli() + delayMs
+	if err := es.MarkPushRetry(dbCtx, row.OutboxID, nextAttempt, nextRetryAt, sendErr.Error()); err != nil {
+		common.Warnf("push: mark retry failed event_id=%s: %v", row.EventID, err)
+	}
+	common.Warnf("push: delivery failed event_id=%s attempt=%d retry_in_ms=%d: %v",
+		row.EventID, nextAttempt, int(delayMs), sendErr)
+}
+
+// dispatchRow decides the best delivery method for a single push row.
+func dispatchRow(row store.PushOutboxRow, session *openclaw.Session, channel, target string) error {
+	att := openclaw.ExtractAttachment(row)
+
+	if att == nil {
+		text := openclaw.FormatPushText(row)
+		return openclaw.SendToSession(session.SessionID, text)
+	}
+
+	if channel != "" && target != "" {
+		return dispatchWithMedia(row, att, channel, target, session)
+	}
+
+	text := openclaw.FormatExternalURLText(row, att)
+	return openclaw.SendToSession(session.SessionID, text)
+}
+
+// dispatchWithMedia downloads the attachment and sends it via openclaw message send.
+func dispatchWithMedia(row store.PushOutboxRow, att *openclaw.AttachmentInfo, channel, target string, session *openclaw.Session) error {
+	localPath, dlErr := openclaw.DownloadFile(att.URL, att.Name)
+	if dlErr != nil {
+		common.Warnf("push: download failed (%s), falling back to URL text: %v", att.Name, dlErr)
+		text := openclaw.FormatExternalURLText(row, att)
+		return openclaw.SendToSession(session.SessionID, text)
+	}
+
+	common.Debugf("push: downloaded %s → %s", att.Name, localPath)
+
+	msgText := openclaw.FormatPushTextForMedia(row)
+	sendErr := openclaw.SendMediaToChannel(channel, target, msgText, localPath)
+	if sendErr != nil {
+		common.Warnf("push: media send failed, falling back to agent: %v", sendErr)
+		text := openclaw.FormatExternalURLText(row, att)
+		return openclaw.SendToSession(session.SessionID, text)
+	}
+	return nil
 }

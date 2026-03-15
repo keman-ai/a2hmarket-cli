@@ -271,9 +271,15 @@ func listenerRunCmd(c *cli.Context) error {
 				continue
 			}
 			if !hbResult.OK {
-				common.Warnf("heartbeat revoked (reason=%s) — demoting to follower", hbResult.Reason)
-				role = lease.RoleFollower
-				continue
+				// Another instance has taken over. Unsubscribe from MQTT so we
+				// stop receiving messages immediately, then exit cleanly.
+				// The process manager (systemd/supervisor/nohup-restart) will
+				// restart us; on the next acquire we'll get role=follower and
+				// connect with a suffixed clientId — no more MQTT contention.
+				common.Warnf("heartbeat revoked (reason=%s) — unsubscribing and shutting down", hbResult.Reason)
+				transport.Unsubscribe()
+				fmt.Println("\nShutting down listener... (lease revoked, restart to run as follower)")
+				return nil
 			}
 			epoch = hbResult.Epoch
 			leaseUntil = hbResult.LeaseUntil
@@ -381,15 +387,13 @@ func listenerTakeoverCmd(c *cli.Context) error {
 		return fmt.Errorf("takeover failed: %w", err)
 	}
 
-	if !result.OK {
-		fmt.Println("Takeover failed — already leader or control plane error")
-		return nil
-	}
-
 	fmt.Printf("Takeover successful!\n")
+	fmt.Printf("  Role:           %s\n", result.Role)
 	fmt.Printf("  New epoch:      %d\n", result.Epoch)
 	fmt.Printf("  Prev leader:    %s\n", orDash(result.PrevLeaderID))
-	fmt.Printf("  Lease until:    %s\n", time.UnixMilli(result.LeaseUntil).Local().Format(time.DateTime))
+	if result.LeaseUntil > 0 {
+		fmt.Printf("  Lease until:    %s\n", time.UnixMilli(result.LeaseUntil).Local().Format(time.DateTime))
+	}
 	fmt.Println("\nNote: the former leader will demote automatically on its next heartbeat.")
 	return nil
 }

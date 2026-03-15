@@ -53,11 +53,15 @@ type HeartbeatResult struct {
 }
 
 // TakeoverResult is returned from the takeover call.
+// The server wraps the response in {"success":true,"data":{...}}; the do()
+// method already returns an error when success!=true, so a nil error from
+// Takeover() means the takeover succeeded on the server side.
 type TakeoverResult struct {
-	OK               bool   `json:"ok"`
+	Role             Role   `json:"role"`
 	Epoch            int64  `json:"epoch"`
 	PrevLeaderID     string `json:"prevLeaderId"`
 	LeaseUntil       int64  `json:"leaseUntil"`
+	LeaderInstanceID string `json:"leaderInstanceId"`
 }
 
 // StatusResult is returned from the status call.

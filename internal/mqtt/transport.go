@@ -132,6 +132,20 @@ func (t *Transport) Connect() error {
 	return nil
 }
 
+// Unsubscribe cancels the P2P topic subscription for this agent.
+// Should be called before closing when demoted from leader to follower,
+// so the broker no longer routes messages to this connection.
+func (t *Transport) Unsubscribe() {
+	t.mu.Lock()
+	client := t.client
+	t.mu.Unlock()
+	if client == nil || !client.IsConnected() {
+		return
+	}
+	tok := client.Unsubscribe(IncomingTopic(t.agentID))
+	tok.WaitTimeout(5 * time.Second)
+}
+
 // Subscribe subscribes to the incoming P2P topic for this agent.
 func (t *Transport) Subscribe() error {
 	t.mu.Lock()
