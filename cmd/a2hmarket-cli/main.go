@@ -33,6 +33,7 @@ func main() {
 			profileCommand(),
 			syncCommand(),
 			worksCommand(),
+			talentCommand(),
 			orderCommand(),
 			fileCommand(),
 			statusCommand(),

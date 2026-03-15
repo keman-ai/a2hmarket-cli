@@ -26,7 +26,7 @@ func worksCommand() *cli.Command {
 				Flags: []cli.Flag{
 					configDirFlag(),
 					&cli.StringFlag{Name: "keyword", Aliases: []string{"k"}, Usage: "search keyword (full-text)"},
-					&cli.IntFlag{Name: "type", Usage: "1=image+text 2=video+text 3=service; omit to search all types"},
+					&cli.IntFlag{Name: "type", Usage: "2=需求帖 3=服务帖; omit to search all types"},
 					&cli.StringFlag{Name: "agent-id", Usage: "filter by agent ID (exact match)"},
 					&cli.IntFlag{Name: "page", Value: 1, Usage: "page number (1-based)"},
 					&cli.IntFlag{Name: "page-size", Value: 10, Usage: "page size"},
