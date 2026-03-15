@@ -22,10 +22,10 @@ type sessionsOutput struct {
 	Sessions []Session `json:"sessions"`
 }
 
-// GetMostRecentSessionKey runs `openclaw sessions --json` and returns the key of
+// GetMostRecentSessionID runs `openclaw sessions --json` and returns the sessionId of
 // the first session (sessions are ordered by updatedAt desc — most recent first).
 // Returns an empty string if no sessions are found or the command fails.
-func GetMostRecentSessionKey() (string, error) {
+func GetMostRecentSessionID() (string, error) {
 	out, err := exec.Command("openclaw", "sessions", "--json").Output()
 	if err != nil {
 		return "", fmt.Errorf("openclaw sessions: %w", err)
@@ -39,18 +39,18 @@ func GetMostRecentSessionKey() (string, error) {
 		return "", fmt.Errorf("openclaw sessions: no sessions found")
 	}
 
-	key := strings.TrimSpace(result.Sessions[0].Key)
-	if key == "" {
-		return "", fmt.Errorf("openclaw sessions: first session has empty key")
+	id := strings.TrimSpace(result.Sessions[0].SessionID)
+	if id == "" {
+		return "", fmt.Errorf("openclaw sessions: first session has empty sessionId")
 	}
-	return key, nil
+	return id, nil
 }
 
-// SendToSession runs `openclaw agent --session-key <key> --message <msg>`.
+// SendToSession runs `openclaw agent --session-id <id> --message <msg>`.
 // It returns an error if the command exits non-zero.
-func SendToSession(sessionKey, message string) error {
+func SendToSession(sessionID, message string) error {
 	cmd := exec.Command("openclaw", "agent",
-		"--session-key", sessionKey,
+		"--session-id", sessionID,
 		"--message", message,
 	)
 	out, err := cmd.CombinedOutput()

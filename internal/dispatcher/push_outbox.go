@@ -23,7 +23,7 @@ type PushStats struct {
 }
 
 // FlushPushOutbox reads pending push_outbox rows and delivers them to OpenClaw
-// via `openclaw sessions --json` + `openclaw agent --session-key <key> --message <msg>`.
+// via `openclaw sessions --json` + `openclaw agent --session-id <id> --message <msg>`.
 //
 // Session discovery is best-effort: the first session returned by `openclaw sessions`
 // (ordered by updatedAt desc) is used as the push target.
@@ -46,7 +46,7 @@ func FlushPushOutbox(ctx context.Context, es *store.EventStore, cfg PushDispatch
 	}
 
 	// Resolve the target session once per flush (avoids repeated subprocess calls).
-	sessionKey, sessErr := openclaw.GetMostRecentSessionKey()
+	sessionID, sessErr := openclaw.GetMostRecentSessionID()
 	if sessErr != nil {
 		common.Warnf("push: cannot resolve openclaw session: %v", sessErr)
 		// Don't retry individual rows yet; wait for the next tick.
@@ -60,7 +60,7 @@ func FlushPushOutbox(ctx context.Context, es *store.EventStore, cfg PushDispatch
 		}
 
 		text := openclaw.FormatPushText(row)
-		sendErr := openclaw.SendToSession(sessionKey, text)
+		sendErr := openclaw.SendToSession(sessionID, text)
 
 		if sendErr == nil {
 			// Mark SENT; ack deadline = now + 15 s (simple, no consumer ACK needed here)
@@ -68,7 +68,7 @@ func FlushPushOutbox(ctx context.Context, es *store.EventStore, cfg PushDispatch
 			if err := es.MarkPushSent(ctx, row.OutboxID, row.EventID, ackDeadline); err != nil {
 				common.Warnf("push: mark sent failed event_id=%s: %v", row.EventID, err)
 			} else {
-				common.Infof("push: delivered event_id=%s session=%s", row.EventID, sessionKey)
+				common.Infof("push: delivered event_id=%s session=%s", row.EventID, sessionID)
 				stats.Sent++
 			}
 			continue
