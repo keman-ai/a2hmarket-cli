@@ -12,6 +12,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/keman-ai/a2hmarket-cli/internal/common"
 )
 
 // Session holds the key fields of an OpenClaw session.
@@ -32,13 +34,16 @@ type sessionsOutput struct {
 // Tries the local gateway first, then falls back to the openclaw CLI.
 func GetMostRecentSession() (*Session, error) {
 	// 1. Try gateway
-	sessions, err := GatewaySessionsList()
-	if err == nil && len(sessions) > 0 {
+	sessions, gwErr := GatewaySessionsList()
+	if gwErr == nil && len(sessions) > 0 {
 		s := &sessions[0]
 		s.SessionID = strings.TrimSpace(s.SessionID)
 		if s.SessionID != "" {
 			return s, nil
 		}
+	}
+	if gwErr != nil {
+		common.Debugf("openclaw gateway unavailable (%v), falling back to CLI", gwErr)
 	}
 
 	// 2. Fall back to CLI
@@ -46,7 +51,9 @@ func GetMostRecentSession() (*Session, error) {
 	if err != nil {
 		return nil, fmt.Errorf("openclaw sessions: gateway unavailable and %w", err)
 	}
-	out, err := exec.Command(bin, "sessions", "--json").Output()
+	cmd := exec.Command(bin, "sessions", "--json")
+	cmd.Env = enrichedEnv()
+	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("openclaw sessions (cli): %w", err)
 	}
@@ -119,6 +126,7 @@ func SendToSession(sessionKey, message string) error {
 		"--message", message,
 		"--deliver",
 	)
+	cmd.Env = enrichedEnv()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		detail := strings.TrimSpace(string(out))
@@ -164,6 +172,7 @@ func SendMediaToChannel(channel, target, message, mediaPath string) error {
 		args = append(args, "--media", mediaPath)
 	}
 	cmd := exec.Command(bin, args...)
+	cmd.Env = enrichedEnv()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		detail := strings.TrimSpace(string(out))
@@ -176,7 +185,7 @@ func SendMediaToChannel(channel, target, message, mediaPath string) error {
 }
 
 // findOpenclawBinary locates the openclaw executable.
-// It tries $PATH first, then common install locations.
+// It tries $PATH first, then common install locations (including Homebrew and nvm paths).
 func findOpenclawBinary() (string, error) {
 	if path, err := exec.LookPath("openclaw"); err == nil {
 		return path, nil
@@ -186,6 +195,7 @@ func findOpenclawBinary() (string, error) {
 		filepath.Join(home, ".local/bin/openclaw"),
 		filepath.Join(home, "bin/openclaw"),
 		"/usr/local/bin/openclaw",
+		"/opt/homebrew/bin/openclaw",
 		"/usr/bin/openclaw",
 	}
 	for _, c := range candidates {
@@ -194,4 +204,52 @@ func findOpenclawBinary() (string, error) {
 		}
 	}
 	return "", fmt.Errorf("openclaw binary not found in PATH or common locations")
+}
+
+// findNodeBinary locates the node executable so Node.js-based CLI wrappers can run.
+// Under LaunchAgent / nohup the PATH is minimal and nvm is not initialised.
+func findNodeBinary() string {
+	if path, err := exec.LookPath("node"); err == nil {
+		return path
+	}
+	home := os.Getenv("HOME")
+	// nvm installs node under ~/.nvm/versions/node/<version>/bin/node
+	nvmDir := filepath.Join(home, ".nvm", "versions", "node")
+	if entries, err := os.ReadDir(nvmDir); err == nil {
+		// pick the last (highest) version directory
+		for i := len(entries) - 1; i >= 0; i-- {
+			candidate := filepath.Join(nvmDir, entries[i].Name(), "bin", "node")
+			if _, err := os.Stat(candidate); err == nil {
+				return candidate
+			}
+		}
+	}
+	// Homebrew node (Apple Silicon / Intel)
+	for _, p := range []string{
+		"/opt/homebrew/bin/node",
+		"/usr/local/bin/node",
+	} {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return ""
+}
+
+// enrichedEnv returns os.Environ() with the node binary's directory prepended to PATH,
+// so that Node.js-based CLI wrappers (like openclaw) work under restricted environments.
+func enrichedEnv() []string {
+	nodeBin := findNodeBinary()
+	if nodeBin == "" {
+		return os.Environ()
+	}
+	nodeDir := filepath.Dir(nodeBin)
+	env := os.Environ()
+	for i, e := range env {
+		if strings.HasPrefix(e, "PATH=") {
+			env[i] = "PATH=" + nodeDir + string(os.PathListSeparator) + e[5:]
+			return env
+		}
+	}
+	return append(env, "PATH="+nodeDir)
 }

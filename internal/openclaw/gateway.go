@@ -194,12 +194,13 @@ type gwReq struct {
 }
 
 type gwFrame struct {
-	Type   string          `json:"type"`
-	ID     string          `json:"id,omitempty"`
-	Event  string          `json:"event,omitempty"`
-	Result json.RawMessage `json:"result,omitempty"`
-	Error  json.RawMessage `json:"error,omitempty"`
-	Data   json.RawMessage `json:"data,omitempty"`
+	Type    string          `json:"type"`
+	ID      string          `json:"id,omitempty"`
+	Event   string          `json:"event,omitempty"`
+	Result  json.RawMessage `json:"result,omitempty"`
+	Error   json.RawMessage `json:"error,omitempty"`
+	Data    json.RawMessage `json:"data,omitempty"`    // older gateway versions
+	Payload json.RawMessage `json:"payload,omitempty"` // newer gateway versions use "payload"
 }
 
 var gwReqCounter uint64
@@ -234,6 +235,10 @@ func sendRPC(conn *websocket.Conn, method string, params interface{}) (json.RawM
 			continue // unrelated event or response — skip
 		}
 		if f.Type == "res" {
+			// newer gateway versions put the body in "payload"; older use "result"
+			if len(f.Payload) > 0 {
+				return f.Payload, nil
+			}
 			return f.Result, nil
 		}
 		if f.Type == "err" {
@@ -292,7 +297,12 @@ func openGatewaySession() (*gwSession, error) {
 			var d struct {
 				Nonce string `json:"nonce"`
 			}
-			if err := json.Unmarshal(f.Data, &d); err == nil && d.Nonce != "" {
+			// gateway uses "payload" (newer) or "data" (older) for event body
+			raw := f.Payload
+			if len(raw) == 0 {
+				raw = f.Data
+			}
+			if err := json.Unmarshal(raw, &d); err == nil && d.Nonce != "" {
 				nonce = d.Nonce
 			}
 		}
@@ -367,18 +377,27 @@ func GatewaySessionsList() ([]Session, error) {
 		return nil, fmt.Errorf("sessions.list: %w", err)
 	}
 
-	// Response may be {"sessions":[...]} or directly [...].
+	// Response: { "sessions": [...], "count": N, ... }
+	// Sessions array may live at top-level or inside a wrapper.
 	var wrapper struct {
 		Sessions []Session `json:"sessions"`
 	}
 	if err := json.Unmarshal(result, &wrapper); err == nil && len(wrapper.Sessions) > 0 {
 		return wrapper.Sessions, nil
 	}
+	// Fallback: response is directly an array
 	var list []Session
 	if err := json.Unmarshal(result, &list); err != nil {
-		return nil, fmt.Errorf("sessions.list parse: %w", err)
+		return nil, fmt.Errorf("sessions.list parse: %w (raw=%s)", err, string(result)[:min(120, len(result))])
 	}
 	return list, nil
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // GatewayChatSend injects a message into an AI session via chat.send RPC.
