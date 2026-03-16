@@ -63,14 +63,22 @@ func listenerCommand() *cli.Command {
 					&cli.StringFlag{Name: "config-dir", Value: "~/.a2hmarket", Usage: "config directory"},
 				},
 			},
-			{
-				Name:   "takeover",
-				Usage:  "Explicitly seize the leader role for this instance",
-				Action: listenerTakeoverCmd,
-				Flags: []cli.Flag{
-					&cli.StringFlag{Name: "config-dir", Value: "~/.a2hmarket", Usage: "config directory"},
-				},
+		{
+			Name:   "takeover",
+			Usage:  "Explicitly seize the leader role for this instance",
+			Action: listenerTakeoverCmd,
+			Flags: []cli.Flag{
+				&cli.StringFlag{Name: "config-dir", Value: "~/.a2hmarket", Usage: "config directory"},
 			},
+		},
+		{
+			Name:   "reload",
+			Usage:  "Hot-reload credentials (e.g. push_enabled) without restarting the listener",
+			Action: listenerReloadCmd,
+			Flags: []cli.Flag{
+				&cli.StringFlag{Name: "config-dir", Value: "~/.a2hmarket", Usage: "config directory"},
+			},
+		},
 		},
 	}
 }
@@ -252,6 +260,9 @@ func listenerRunCmd(c *cli.Context) error {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
+	reloadCh := make(chan os.Signal, 1)
+	signal.Notify(reloadCh, syscall.SIGUSR1)
+
 	a2aDispatchCfg := dispatcher.A2ADispatchConfig{
 		BatchSize:  50,
 		MaxRetries: 10,
@@ -267,6 +278,16 @@ func listenerRunCmd(c *cli.Context) error {
 		case <-sigCh:
 			fmt.Println("\nShutting down listener...")
 			return nil
+
+		case <-reloadCh:
+			newCreds, err := loadCreds(configDir)
+			if err != nil {
+				common.Warnf("reload: failed to read credentials: %v", err)
+				continue
+			}
+			pushEnabled = newCreds.PushEnabled
+			common.Infof("reload: push_enabled=%v", pushEnabled)
+			fmt.Printf("Config reloaded: push_enabled=%v\n", pushEnabled)
 
 		case <-heartbeatTicker.C:
 			if role != lease.RoleLeader {
@@ -422,6 +443,32 @@ func listenerTakeoverCmd(c *cli.Context) error {
 		fmt.Printf("  Lease until:    %s\n", time.UnixMilli(result.LeaseUntil).Local().Format(time.DateTime))
 	}
 	fmt.Println("\nNote: the former leader will demote automatically on its next heartbeat.")
+	return nil
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// listener reload
+// ─────────────────────────────────────────────────────────────────────────────
+
+func listenerReloadCmd(c *cli.Context) error {
+	configDir := expandHome(c.String("config-dir"))
+
+	pid, err := readPIDFile(pidPath(configDir))
+	if err != nil {
+		return fmt.Errorf("listener not running (no PID file): %w", err)
+	}
+
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return fmt.Errorf("process not found (pid=%d): %w", pid, err)
+	}
+
+	if err := proc.Signal(syscall.SIGUSR1); err != nil {
+		return fmt.Errorf("failed to send reload signal (pid=%d): %w", pid, err)
+	}
+
+	fmt.Printf("Reload signal sent to listener (pid=%d).\n", pid)
+	fmt.Println("Check log with: tail ~/.a2hmarket/store/listener.log")
 	return nil
 }
 

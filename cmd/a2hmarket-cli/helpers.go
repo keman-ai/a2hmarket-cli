@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -90,4 +91,17 @@ func dbPath(configDir string) string {
 // pidPath returns the path to the listener PID file inside configDir.
 func pidPath(configDir string) string {
 	return filepath.Join(configDir, "store", "listener.pid")
+}
+
+// readPIDFile reads and parses the PID from a PID file.
+func readPIDFile(path string) (int, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, err
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		return 0, fmt.Errorf("invalid PID in file: %w", err)
+	}
+	return pid, nil
 }
