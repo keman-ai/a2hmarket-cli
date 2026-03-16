@@ -220,7 +220,9 @@ case "$OS" in
 esac
 
 ARCHIVE_EXT="tar.gz"
-[[ "$OS" == "windows" ]] && ARCHIVE_EXT="zip"
+case "$OS" in
+    darwin|windows) ARCHIVE_EXT="zip" ;;
+esac
 
 info "Detected platform: ${OS}/${ARCH}"
 

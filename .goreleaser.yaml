@@ -24,6 +24,10 @@ builds:
     binary: a2hmarket-cli
     ldflags:
       - -s -w -X main.version={{.Version}}
+    hooks:
+      post:
+        - cmd: ./scripts/codesign-darwin-binary.sh "{{ .Path }}" "{{ .Target }}"
+          output: true
 
 archives:
   - format: tar.gz
@@ -32,6 +36,8 @@ archives:
       {{ .ProjectName }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}
     # Windows 平台通常使用 .zip
     format_overrides:
+      - goos: darwin
+        format: zip
       - goos: windows
         format: zip
 
