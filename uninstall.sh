@@ -46,7 +46,7 @@ kill_processes() {
 # ── 4. 删除二进制文件 ────────────────────────────────────────────
 remove_binary() {
     local removed=false
-    for dir in /usr/local/bin "$HOME/bin" "$HOME/go/bin" "$(go env GOPATH 2>/dev/null)/bin"; do
+    for dir in /usr/local/bin "$HOME/.local/bin" "$HOME/bin" "$HOME/go/bin" "$(go env GOPATH 2>/dev/null)/bin"; do
         local bin="$dir/$BINARY"
         if [[ -f "$bin" ]]; then
             rm -f "$bin" && done_ "Binary removed: $bin" && removed=true
