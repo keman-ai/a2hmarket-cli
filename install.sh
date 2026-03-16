@@ -225,16 +225,10 @@ ARCHIVE_EXT="tar.gz"
 info "Detected platform: ${OS}/${ARCH}"
 
 # 获取最新 tag，先尝试自建代理，再直连
-GITHUB_API="https://api.github.com/repos/${REPO}/releases/latest"
-
-TAG=""
-for api_url in \
-    "${A2H_PROXY}/repos/${REPO}/releases/latest" \
-    "$GITHUB_API"; do
-    TAG=$(curl -fsSL --connect-timeout 8 "$api_url" 2>/dev/null \
-        | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-    [[ -n "$TAG" ]] && { info "Fetched tag via: $api_url"; break; }
-done
+# 获取最新 tag：用 GitHub releases/latest 的 HTTP redirect（不走 API，不受 rate limit 限制）
+TAG=$(curl -fsS --connect-timeout 8 -o /dev/null -w '%{url_effective}' \
+    -L "https://github.com/${REPO}/releases/latest" 2>/dev/null \
+    | sed 's|.*/tag/||')
 [[ -z "$TAG" ]] && error "Failed to fetch latest release tag. Please check your network."
 
 info "Latest release: ${TAG}"
