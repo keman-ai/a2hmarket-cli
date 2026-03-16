@@ -2,6 +2,7 @@ package dispatcher
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/keman-ai/a2hmarket-cli/internal/common"
@@ -11,15 +12,17 @@ import (
 
 // PushDispatchConfig controls push_outbox flush behaviour.
 type PushDispatchConfig struct {
-	BatchSize  int // rows per flush (default 20)
-	MaxDelayMs int // max retry back-off in ms (default 300_000 = 5 min)
+	BatchSize  int            // rows per flush (default 20)
+	MaxDelayMs int            // max retry back-off in ms (default 300_000 = 5 min)
+	WaitGroup  *sync.WaitGroup // optional: track in-flight goroutines for graceful shutdown
 }
 
 // PushStats summarises one flush run.
 type PushStats struct {
-	Sent    int
-	Retried int
-	Skipped int
+	Sent                int
+	Retried             int
+	Skipped             int
+	SessionUnavailable  bool
 }
 
 // FlushPushOutbox reads pending push_outbox rows and delivers them to OpenClaw.
@@ -48,8 +51,8 @@ func FlushPushOutbox(ctx context.Context, es *store.EventStore, cfg PushDispatch
 
 	session, sessErr := openclaw.GetMostRecentSession()
 	if sessErr != nil {
-		common.Warnf("push: cannot resolve openclaw session: %v", sessErr)
-		return PushStats{}, nil
+		common.Warnf("push: cannot resolve openclaw session, skipping %d rows (will retry next tick): %v", len(rows), sessErr)
+		return PushStats{Skipped: len(rows), SessionUnavailable: true}, nil
 	}
 
 	channel, target := openclaw.ParseSessionKey(session.Key)
@@ -75,7 +78,15 @@ func FlushPushOutbox(ctx context.Context, es *store.EventStore, cfg PushDispatch
 
 		rowCopy := row
 		sessCopy := session
-		go dispatchAsync(es, rowCopy, sessCopy, channel, target, cfg)
+		if cfg.WaitGroup != nil {
+			cfg.WaitGroup.Add(1)
+		}
+		go func() {
+			if cfg.WaitGroup != nil {
+				defer cfg.WaitGroup.Done()
+			}
+			dispatchAsync(es, rowCopy, sessCopy, channel, target, cfg)
+		}()
 		stats.Sent++
 	}
 

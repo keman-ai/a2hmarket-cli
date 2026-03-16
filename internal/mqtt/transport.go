@@ -93,27 +93,7 @@ func (t *Transport) Connect() error {
 		return fmt.Errorf("mqtt connect: get token: %w", err)
 	}
 
-	opts := paho.NewClientOptions()
-	opts.AddBroker(t.brokerURL)
-	opts.SetClientID(connClientID)
-	opts.SetUsername(cred.Username)
-	opts.SetPassword(cred.Password)
-	opts.SetTLSConfig(&tls.Config{InsecureSkipVerify: true}) //nolint:gosec
-	opts.SetCleanSession(t.cleanSession)
-	opts.SetKeepAlive(keepAlive)
-	opts.SetConnectTimeout(connectTimeout)
-	opts.SetAutoReconnect(false)
-
-	opts.SetDefaultPublishHandler(func(_ paho.Client, msg paho.Message) {
-		if t.onMessage != nil {
-			t.onMessage(Message{Topic: msg.Topic(), Payload: string(msg.Payload())})
-		}
-	})
-
-	opts.SetConnectionLostHandler(func(_ paho.Client, connErr error) {
-		// Background reconnect with exponential backoff
-		go t.reconnectLoop(connClientID, connErr)
-	})
+	opts := t.buildMQTTOptions(connClientID, t.cleanSession, cred.Username, cred.Password)
 
 	client := paho.NewClient(opts)
 	token := client.Connect()
@@ -208,6 +188,30 @@ func (t *Transport) Close() {
 	}
 }
 
+// buildMQTTOptions constructs a shared paho.ClientOptions with all common settings.
+// Both Connect() and reconnectLoop() call this to avoid configuration drift.
+func (t *Transport) buildMQTTOptions(clientID string, cleanSession bool, username, password string) *paho.ClientOptions {
+	opts := paho.NewClientOptions()
+	opts.AddBroker(t.brokerURL)
+	opts.SetClientID(clientID)
+	opts.SetUsername(username)
+	opts.SetPassword(password)
+	opts.SetTLSConfig(&tls.Config{InsecureSkipVerify: true}) //nolint:gosec
+	opts.SetCleanSession(cleanSession)
+	opts.SetKeepAlive(keepAlive)
+	opts.SetConnectTimeout(connectTimeout)
+	opts.SetAutoReconnect(false)
+	opts.SetDefaultPublishHandler(func(_ paho.Client, msg paho.Message) {
+		if t.onMessage != nil {
+			t.onMessage(Message{Topic: msg.Topic(), Payload: string(msg.Payload())})
+		}
+	})
+	opts.SetConnectionLostHandler(func(_ paho.Client, err error) {
+		go t.reconnectLoop(clientID, err)
+	})
+	return opts
+}
+
 func (t *Transport) reconnectLoop(connClientID string, lostErr error) {
 	delays := []time.Duration{1, 2, 4, 8, 16, 30}
 	attempt := 0
@@ -222,24 +226,7 @@ func (t *Transport) reconnectLoop(connClientID string, lostErr error) {
 			continue
 		}
 
-		opts := paho.NewClientOptions()
-		opts.AddBroker(t.brokerURL)
-		opts.SetClientID(connClientID)
-		opts.SetUsername(cred.Username)
-		opts.SetPassword(cred.Password)
-		opts.SetTLSConfig(&tls.Config{InsecureSkipVerify: true}) //nolint:gosec
-		opts.SetCleanSession(false)
-		opts.SetKeepAlive(keepAlive)
-		opts.SetConnectTimeout(connectTimeout)
-		opts.SetAutoReconnect(false)
-		opts.SetDefaultPublishHandler(func(_ paho.Client, msg paho.Message) {
-			if t.onMessage != nil {
-				t.onMessage(Message{Topic: msg.Topic(), Payload: string(msg.Payload())})
-			}
-		})
-		opts.SetConnectionLostHandler(func(_ paho.Client, err error) {
-			go t.reconnectLoop(connClientID, err)
-		})
+		opts := t.buildMQTTOptions(connClientID, false, cred.Username, cred.Password)
 
 		client := paho.NewClient(opts)
 		tok := client.Connect()

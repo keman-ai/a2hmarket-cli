@@ -40,7 +40,7 @@ func sendMessageCmd(c *cli.Context) error {
 
 	creds, err := loadCreds(configDir)
 	if err != nil {
-		return err
+		return outputError("send", err)
 	}
 
 	targetAgentID := c.String("target-agent-id")
@@ -51,7 +51,7 @@ func sendMessageCmd(c *cli.Context) error {
 	payload := make(map[string]interface{})
 	if payloadJSON != "" {
 		if err := json.Unmarshal([]byte(payloadJSON), &payload); err != nil {
-			return fmt.Errorf("invalid --payload-json: %w", err)
+			return outputError("send", fmt.Errorf("invalid --payload-json: %w", err))
 		}
 	}
 	if text != "" {
@@ -59,12 +59,12 @@ func sendMessageCmd(c *cli.Context) error {
 	}
 
 	if _, hasImage := payload["image"]; hasImage {
-		return fmt.Errorf("payload.image 字段已废弃，请改用 --payment-qr 或 --attachment / --url")
+		return outputError("send", fmt.Errorf("payload.image 字段已废弃，请改用 --payment-qr 或 --attachment / --url"))
 	}
 
 	if qr := c.String("payment-qr"); qr != "" {
 		if !strings.HasPrefix(qr, "http://") && !strings.HasPrefix(qr, "https://") {
-			return fmt.Errorf("--payment-qr 必须以 http:// 或 https:// 开头")
+			return outputError("send", fmt.Errorf("--payment-qr 必须以 http:// 或 https:// 开头"))
 		}
 		payload["payment_qr"] = qr
 	}
@@ -72,13 +72,13 @@ func sendMessageCmd(c *cli.Context) error {
 	attachPath := c.String("attachment")
 	externalURL := c.String("url")
 	if attachPath != "" && externalURL != "" {
-		return fmt.Errorf("--attachment 和 --url 不能同时使用")
+		return outputError("send", fmt.Errorf("--attachment 和 --url 不能同时使用"))
 	}
 
 	if attachPath != "" {
 		fileInfo, err := oss.Upload(creds, attachPath, "chatfile", nil)
 		if err != nil {
-			return fmt.Errorf("attachment upload: %w", err)
+			return outputError("send", fmt.Errorf("attachment upload: %w", err))
 		}
 		payload["attachment"] = map[string]interface{}{
 			"url":        fileInfo.URL,
@@ -90,7 +90,7 @@ func sendMessageCmd(c *cli.Context) error {
 		}
 	} else if externalURL != "" {
 		if !strings.HasPrefix(externalURL, "http://") && !strings.HasPrefix(externalURL, "https://") {
-			return fmt.Errorf("--url 必须以 http:// 或 https:// 开头")
+			return outputError("send", fmt.Errorf("--url 必须以 http:// 或 https:// 开头"))
 		}
 		att := map[string]interface{}{
 			"url":    externalURL,
@@ -117,7 +117,7 @@ func sendMessageCmd(c *cli.Context) error {
 
 	env, err := protocol.BuildEnvelope(creds.AgentID, targetAgentID, messageType, payload)
 	if err != nil {
-		return fmt.Errorf("build envelope: %w", err)
+		return outputError("send", fmt.Errorf("build envelope: %w", err))
 	}
 	signed := protocol.Sign(creds.AgentKey, env)
 
@@ -129,18 +129,33 @@ func sendMessageCmd(c *cli.Context) error {
 	transport := mqttpkg.NewTransportWithClientID(creds.MQTTURL, tc, creds.AgentID, sendClientID)
 
 	if err := transport.Connect(); err != nil {
-		return fmt.Errorf("mqtt connect: %w", err)
+		return outputError("send", fmt.Errorf("mqtt connect: %w", err))
 	}
 	defer transport.Close()
 
-	if err := transport.Publish(targetAgentID, signed); err != nil {
-		return fmt.Errorf("mqtt publish: %w", err)
+	// Retry publish up to 3 times with exponential backoff (1s, 2s, 4s).
+	const maxRetries = 3
+	var publishErr error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		publishErr = transport.Publish(targetAgentID, signed)
+		if publishErr == nil {
+			break
+		}
+		common.Warnf("send: publish attempt %d/%d failed: %v", attempt+1, maxRetries, publishErr)
+		if attempt < maxRetries-1 {
+			time.Sleep(time.Duration(1<<uint(attempt)) * time.Second)
+		}
+	}
+	if publishErr != nil {
+		return outputError("send", fmt.Errorf("mqtt publish (after %d attempts): %w", maxRetries, publishErr))
 	}
 
 	// Brief pause so paho flushes the packet before Disconnect.
 	time.Sleep(300 * time.Millisecond)
 
-	fmt.Printf("Sent  message_id=%s  target=%s  type=%s\n",
-		signed.MessageID, targetAgentID, messageType)
-	return nil
+	return outputOK("send", map[string]interface{}{
+		"message_id": signed.MessageID,
+		"target_id":  targetAgentID,
+		"type":       messageType,
+	})
 }

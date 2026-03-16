@@ -6,13 +6,60 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"time"
 )
 
+// tryStartViaServiceManager attempts to start the listener through a system service manager.
+// Returns true if a service file was found and the start command was issued (best-effort).
+func tryStartViaServiceManager() bool {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false
+	}
+
+	// macOS: LaunchAgent
+	if runtime.GOOS == "darwin" {
+		plistPath := filepath.Join(home, "Library", "LaunchAgents", "ai.a2hmarket.listener.plist")
+		if _, err := os.Stat(plistPath); err == nil {
+			// launchctl load is idempotent (no error if already loaded).
+			_ = exec.Command("launchctl", "load", plistPath).Run()
+			return true
+		}
+	}
+
+	// Linux: systemd user unit
+	if runtime.GOOS == "linux" {
+		unitPath := filepath.Join(home, ".config", "systemd", "user", "a2hmarket-listener.service")
+		if _, err := os.Stat(unitPath); err == nil {
+			_ = exec.Command("systemctl", "--user", "start", "a2hmarket-listener").Run()
+			return true
+		}
+	}
+
+	return false
+}
+
 // ensureListenerRunning starts `listener run` in background when it is not alive.
 // Best-effort only: failures are reported to stderr but never block the caller.
+// Prefers system service managers (launchd / systemd) when configured, falling back
+// to direct subprocess spawn.
 func ensureListenerRunning(configDir string) {
 	if isListenerAlive(pidPath(configDir)) {
+		return
+	}
+
+	// Try service manager first — if a service file exists, delegate to the OS.
+	if tryStartViaServiceManager() {
+		// Give the service manager a moment, then check liveness.
+		for i := 0; i < 10; i++ {
+			time.Sleep(100 * time.Millisecond)
+			if isListenerAlive(pidPath(configDir)) {
+				return
+			}
+		}
+		// Service manager was invoked; do not fall through to direct spawn
+		// to avoid conflicting with the managed process.
 		return
 	}
 

@@ -30,6 +30,15 @@ WHERE e.seq > ? AND a.event_id IS NULL
 ORDER BY e.seq ASC
 LIMIT ?`
 
+const sqlPullEventsWithPeer = `
+SELECT e.seq, e.event_id, e.peer_id, e.message_id, e.msg_ts, e.unread_count,
+       e.preview, e.payload_json, e.state, e.created_at, e.updated_at
+FROM message_event e
+LEFT JOIN consumer_ack a ON a.event_id = e.event_id AND a.consumer_id = ?
+WHERE e.seq > ? AND a.event_id IS NULL AND e.peer_id = ?
+ORDER BY e.seq ASC
+LIMIT ?`
+
 const sqlGetLatestEvents = `
 SELECT seq, event_id, peer_id, unread_count, preview, state, created_at
 FROM message_event
@@ -200,12 +209,29 @@ func scanEvent(row *sql.Row) (*Event, error) {
 	return &e, nil
 }
 
+// PullEventsOpts holds optional filters for PullEvents.
+type PullEventsOpts struct {
+	PeerID string // if non-empty, only return events from this peer
+}
+
 // PullEvents returns events with seq > cursor that have not been acked by consumerId.
-func (s *EventStore) PullEvents(ctx context.Context, consumerID string, cursor int64, limit int) ([]PullEvent, error) {
+func (s *EventStore) PullEvents(ctx context.Context, consumerID string, cursor int64, limit int, opts ...PullEventsOpts) ([]PullEvent, error) {
 	if limit <= 0 {
 		limit = 20
 	}
-	rows, err := s.stmtPullEvents.QueryContext(ctx, consumerID, cursor, limit)
+
+	var peerID string
+	if len(opts) > 0 {
+		peerID = opts[0].PeerID
+	}
+
+	var rows *sql.Rows
+	var err error
+	if peerID == "" {
+		rows, err = s.stmtPullEvents.QueryContext(ctx, consumerID, cursor, limit)
+	} else {
+		rows, err = s.db.QueryContext(ctx, sqlPullEventsWithPeer, consumerID, cursor, peerID, limit)
+	}
 	if err != nil {
 		return nil, err
 	}

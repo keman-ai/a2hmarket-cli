@@ -123,19 +123,19 @@ func genAuthCodeCmd(c *cli.Context) error {
 		return generateLocalAuthCode(loginURL, timestamp, macAddr)
 	}
 
-	fmt.Printf("Auth code generated: %s\n", loginResp.Code)
-	fmt.Printf("Login URL:\n%s\n", loginResp.URL)
-	fmt.Printf("Timestamp: %d\n", timestamp)
-	fmt.Printf("MAC Address: %s\n", macAddr)
-	fmt.Println("\nPlease open the URL in PC browser to complete login")
-	fmt.Println("Then run 'a2hmarket-cli get-auth --code <code>' to fetch credentials")
-	return nil
+	return outputOK("gen-auth-code", map[string]interface{}{
+		"code":      loginResp.Code,
+		"url":       loginResp.URL,
+		"timestamp": timestamp,
+		"mac":       macAddr,
+		"hint":      "Please open the URL in PC browser to complete login, then run 'a2hmarket-cli get-auth --code <code>' to fetch credentials",
+	})
 }
 
 func generateLocalAuthCode(loginURL string, timestamp int64, macAddr string) error {
 	rawCode, err := generateAuthCode()
 	if err != nil {
-		return fmt.Errorf("failed to generate auth code: %w", err)
+		return outputError("gen-auth-code", fmt.Errorf("failed to generate auth code: %w", err))
 	}
 	cleanMac := strings.ReplaceAll(macAddr, ":", "")
 	rawString := fmt.Sprintf("%s_%d_%s", rawCode, timestamp, cleanMac)
@@ -143,12 +143,13 @@ func generateLocalAuthCode(loginURL string, timestamp int64, macAddr string) err
 	authCode := hex.EncodeToString(hash[:])
 	url := fmt.Sprintf("%s/authcode?code=%s", loginURL, authCode)
 
-	fmt.Printf("Auth code generated: %s\n", authCode)
-	fmt.Printf("Login URL:\n%s\n", url)
-	fmt.Printf("Raw string (before MD5): %s\n", rawString)
-	fmt.Println("\nPlease open the URL in PC browser to complete login")
-	fmt.Println("Then run 'a2hmarket-cli get-auth --code <code>' to fetch credentials")
-	return nil
+	return outputOK("gen-auth-code", map[string]interface{}{
+		"code":      authCode,
+		"url":       url,
+		"timestamp": timestamp,
+		"mac":       macAddr,
+		"hint":      "Please open the URL in PC browser to complete login, then run 'a2hmarket-cli get-auth --code <code>' to fetch credentials",
+	})
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -176,12 +177,12 @@ func pollForAuth(code, baseURL, configDir string) error {
 	delay := 2 * time.Second
 	maxDelay := 30 * time.Second
 
-	fmt.Println("Starting poll for auth status...")
+	common.Infof("Starting poll for auth status...")
 
 	for attempt := 1; attempt <= 30; attempt++ {
 		resp, err := client.Get(checkURL)
 		if err != nil {
-			fmt.Printf("Attempt %d: Error - %v\n", attempt, err)
+			common.Warnf("Attempt %d: Error - %v", attempt, err)
 			time.Sleep(delay)
 			delay = minDur(delay*2, maxDelay)
 			continue
@@ -190,7 +191,7 @@ func pollForAuth(code, baseURL, configDir string) error {
 		var authResp auth.CheckAuthResponse
 		if err := json.NewDecoder(resp.Body).Decode(&authResp); err != nil {
 			resp.Body.Close()
-			fmt.Printf("Attempt %d: Parse error - %v\n", attempt, err)
+			common.Warnf("Attempt %d: Parse error - %v", attempt, err)
 			time.Sleep(delay)
 			delay = minDur(delay*2, maxDelay)
 			continue
@@ -198,7 +199,7 @@ func pollForAuth(code, baseURL, configDir string) error {
 		resp.Body.Close()
 
 		if !authResp.IsSuccess() {
-			return fmt.Errorf("server error (code=%s): %s", authResp.Code, authResp.Message)
+			return outputError("get-auth", fmt.Errorf("server error (code=%s): %s", authResp.Code, authResp.Message))
 		}
 		if authResp.IsAuthorized() {
 			creds := authResp.Data
@@ -208,23 +209,25 @@ func pollForAuth(code, baseURL, configDir string) error {
 			if creds.MQTTURL == "" {
 				creds.MQTTURL = defaultMQTTURL
 			}
-			fmt.Println("Status: authorized")
-			fmt.Printf("Agent ID: %s\n", creds.AgentID)
-			fmt.Printf("API URL:  %s\n", creds.APIURL)
-			fmt.Printf("MQTT URL: %s\n", creds.MQTTURL)
 			if err := saveCredentials(configDir, creds); err != nil {
-				return fmt.Errorf("failed to save credentials: %w", err)
+				return outputError("get-auth", fmt.Errorf("failed to save credentials: %w", err))
 			}
-			fmt.Printf("\nCredentials saved to: %s/credentials.json\n", configDir)
-			fmt.Println("Authentication successful!")
-			return nil
+			ensureListenerRunning(configDir)
+			return outputOK("get-auth", map[string]interface{}{
+				"status":           "authorized",
+				"agent_id":         creds.AgentID,
+				"api_url":          creds.APIURL,
+				"mqtt_url":         creds.MQTTURL,
+				"config_dir":       configDir,
+				"listener_running": isListenerAlive(pidPath(configDir)),
+			})
 		}
 		// code==200 但 data 为空 → 用户尚未扫码/授权
-		fmt.Printf("Attempt %d: pending - waiting for login...\n", attempt)
+		common.Infof("Attempt %d: pending - waiting for login...", attempt)
 		time.Sleep(delay)
 		delay = minDur(delay*2, maxDelay)
 	}
-	return fmt.Errorf("polling timeout - please try again")
+	return outputError("get-auth", fmt.Errorf("polling timeout - please try again"))
 }
 
 func checkAuthOnce(code, baseURL, configDir string) error {
@@ -233,17 +236,17 @@ func checkAuthOnce(code, baseURL, configDir string) error {
 
 	resp, err := client.Get(checkURL)
 	if err != nil {
-		return fmt.Errorf("failed to check auth status: %w", err)
+		return outputError("get-auth", fmt.Errorf("failed to check auth status: %w", err))
 	}
 	defer resp.Body.Close()
 
 	var authResp auth.CheckAuthResponse
 	if err := json.NewDecoder(resp.Body).Decode(&authResp); err != nil {
-		return fmt.Errorf("failed to parse response: %w", err)
+		return outputError("get-auth", fmt.Errorf("failed to parse response: %w", err))
 	}
 
 	if !authResp.IsSuccess() {
-		return fmt.Errorf("server error (code=%s): %s", authResp.Code, authResp.Message)
+		return outputError("get-auth", fmt.Errorf("server error (code=%s): %s", authResp.Code, authResp.Message))
 	}
 	if authResp.IsAuthorized() {
 		creds := authResp.Data
@@ -254,21 +257,24 @@ func checkAuthOnce(code, baseURL, configDir string) error {
 		if creds.MQTTURL == "" {
 			creds.MQTTURL = defaultMQTTURL
 		}
-		fmt.Println("Status: authorized")
-		fmt.Printf("Agent ID: %s\n", creds.AgentID)
-		fmt.Printf("API URL:  %s\n", creds.APIURL)
-		fmt.Printf("MQTT URL: %s\n", creds.MQTTURL)
 		if err := saveCredentials(configDir, creds); err != nil {
-			return fmt.Errorf("failed to save credentials: %w", err)
+			return outputError("get-auth", fmt.Errorf("failed to save credentials: %w", err))
 		}
-		fmt.Printf("\nCredentials saved to: %s/credentials.json\n", configDir)
-		fmt.Println("Authentication successful!")
-		return nil
+		ensureListenerRunning(configDir)
+		return outputOK("get-auth", map[string]interface{}{
+			"status":           "authorized",
+			"agent_id":         creds.AgentID,
+			"api_url":          creds.APIURL,
+			"mqtt_url":         creds.MQTTURL,
+			"config_dir":       configDir,
+			"listener_running": isListenerAlive(pidPath(configDir)),
+		})
 	}
 	// code==200 但 data 为空 → 用户尚未授权
-	fmt.Println("Status: pending - Please complete login in PC browser")
-	fmt.Println("Hint: Use --poll flag to wait for authorization")
-	return nil
+	return outputOK("get-auth", map[string]interface{}{
+		"status": "pending",
+		"hint":   "Please complete login in PC browser. Use --poll flag to wait for authorization.",
+	})
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -281,18 +287,19 @@ func statusCmd(c *cli.Context) error {
 	credPath := filepath.Join(configDir, "credentials.json")
 	creds, err := config.LoadCredentials(credPath)
 	if err != nil {
-		fmt.Println("Not authenticated")
-		fmt.Println("Run 'a2hmarket-cli gen-auth-code' to generate auth code")
-		fmt.Println("Run 'a2hmarket-cli get-auth --code <code>' to get credentials")
-		return nil
+		return outputOK("status", map[string]interface{}{
+			"authenticated": false,
+			"hint":          "Run 'a2hmarket-cli gen-auth-code' to generate auth code, then 'a2hmarket-cli get-auth --code <code>' to get credentials",
+		})
 	}
 
-	fmt.Println("Authenticated")
-	fmt.Printf("Agent ID:   %s\n", creds.AgentID)
-	fmt.Printf("API URL:    %s\n", creds.APIURL)
-	fmt.Printf("MQTT URL:   %s\n", creds.MQTTURL)
-	fmt.Printf("Expires at: %s\n", creds.ExpireAt)
-	return nil
+	return outputOK("status", map[string]interface{}{
+		"authenticated": true,
+		"agent_id":      creds.AgentID,
+		"api_url":       creds.APIURL,
+		"mqtt_url":      creds.MQTTURL,
+		"expires_at":    creds.ExpireAt,
+	})
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -413,3 +420,4 @@ func minDur(a, b time.Duration) time.Duration {
 	}
 	return b
 }
+

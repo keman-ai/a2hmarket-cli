@@ -6,6 +6,7 @@ package mqtt
 
 import (
 	"bytes"
+	cryptoRand "crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -52,16 +53,15 @@ func BuildConnectionClientID(agentID, instanceID string) string {
 }
 
 // BuildSendClientID returns a short-lived clientId for one-shot publish (send command).
-// Uses a random 8-char suffix so it never collides with a running listener's _rt_ clientId.
+// Uses a cryptographically random 8-char suffix so concurrent send commands never collide.
 // Format: GID_agent@@@{agentId}_pub_{random8}
 func BuildSendClientID(agentID string) string {
 	const chars = "abcdef0123456789"
 	b := make([]byte, 8)
-	// Use current nanoseconds for simple uniqueness (no crypto needed here)
-	nano := uint64(time.Now().UnixNano())
+	randBytes := make([]byte, 8)
+	_, _ = cryptoRand.Read(randBytes)
 	for i := range b {
-		b[i] = chars[nano%16]
-		nano >>= 4
+		b[i] = chars[randBytes[i]%16]
 	}
 	return fmt.Sprintf("%s@@@%s_pub_%s", MQTTClientGroupID, agentID, b)
 }

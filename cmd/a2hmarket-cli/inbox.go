@@ -37,6 +37,7 @@ func inboxCommand() *cli.Command {
 					&cli.IntFlag{Name: "limit", Value: 20, Usage: "maximum events to return (1–200)"},
 					&cli.IntFlag{Name: "wait", Value: 0, Usage: "long-poll: max seconds to wait for events (0 = no wait)"},
 					&cli.StringFlag{Name: "source-session-key", Value: "", Usage: "session key for openclaw consumer peer binding"},
+					&cli.StringFlag{Name: "peer-id", Value: "", Usage: "filter events by peer ID (optional)"},
 				},
 			},
 			{
@@ -101,6 +102,7 @@ func inboxPullCmd(c *cli.Context) error {
 	limit := clamp(c.Int("limit"), 1, 200, 20)
 	waitSec := c.Int("wait")
 	sessKey := strings.TrimSpace(c.String("source-session-key"))
+	peerID := strings.TrimSpace(c.String("peer-id"))
 	isOpenClaw := consumerID == "openclaw"
 
 	es, err := openStore(configDir)
@@ -113,7 +115,7 @@ func inboxPullCmd(c *cli.Context) error {
 	deadline := time.Now().Add(time.Duration(waitSec) * time.Second)
 
 	for {
-		events, err := es.PullEvents(ctx, consumerID, cursor, limit)
+		events, err := es.PullEvents(ctx, consumerID, cursor, limit, store.PullEventsOpts{PeerID: peerID})
 		if err != nil {
 			return outputError("inbox.pull", err)
 		}
@@ -359,11 +361,7 @@ func inboxGetCmd(c *cli.Context) error {
 		return outputError("inbox.get", err)
 	}
 	if ev == nil {
-		return outputOK("inbox.get", map[string]interface{}{
-			"ok":       false,
-			"error":    "event_not_found",
-			"event_id": eventID,
-		})
+		return outputError("inbox.get", fmt.Errorf("event not found: %s", eventID))
 	}
 
 	return outputOK("inbox.get", map[string]interface{}{

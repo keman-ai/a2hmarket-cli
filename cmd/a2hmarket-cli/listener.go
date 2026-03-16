@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"syscall"
 	"time"
 
@@ -268,15 +269,28 @@ func listenerRunCmd(c *cli.Context) error {
 		MaxRetries: 10,
 		MaxDelayMs: 120_000,
 	}
+	var pushWg sync.WaitGroup
 	pushDispatchCfg := dispatcher.PushDispatchConfig{
 		BatchSize:  20,
 		MaxDelayMs: 300_000,
+		WaitGroup:  &pushWg,
 	}
 
 	for {
 		select {
 		case <-sigCh:
 			fmt.Println("\nShutting down listener...")
+			waitDone := make(chan struct{})
+			go func() {
+				pushWg.Wait()
+				close(waitDone)
+			}()
+			select {
+			case <-waitDone:
+				common.Infof("all push goroutines finished")
+			case <-time.After(5 * time.Second):
+				common.Warnf("push goroutine drain timeout (5s), exiting anyway")
+			}
 			return nil
 
 		case <-reloadCh:
@@ -361,6 +375,8 @@ func listenerRunCmd(c *cli.Context) error {
 				cancel()
 				if err != nil {
 					common.Warnf("push flush error: %v", err)
+				} else if pushStats.SessionUnavailable {
+					common.Warnf("push flush: session unavailable, skipped=%d (will retry next tick)", pushStats.Skipped)
 				} else if pushStats.Sent > 0 || pushStats.Retried > 0 {
 					common.Infof("push flush: sent=%d retried=%d", pushStats.Sent, pushStats.Retried)
 				}
