@@ -204,7 +204,32 @@ stop_listener_before_install
 # ── 1. 优先用 go install（开发者路径）────────────────────────
 if command -v go >/dev/null 2>&1; then
     info "Found Go $(go version | awk '{print $3}'), installing via go install..."
-    GOPROXY="https://goproxy.cn,https://proxy.golang.org,direct" go install "${PKG}@latest"
+
+    # 获取最新 release tag，用于注入版本号；失败则回退到 "dev"
+    LATEST_TAG=""
+    for api_url in \
+        "${A2H_PROXY}/repos/${REPO}/releases/latest" \
+        "https://api.github.com/repos/${REPO}/releases/latest"; do
+        tag=$(curl -fsSL --connect-timeout 5 "$api_url" 2>/dev/null \
+              | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\(.*\)".*/\1/')
+        if [[ -n "$tag" ]]; then
+            LATEST_TAG="$tag"
+            break
+        fi
+    done
+
+    VERSION_FLAG=""
+    if [[ -n "$LATEST_TAG" ]]; then
+        # 去掉前导 v，与 var version 的格式一致（如 "1.1.2"）
+        VERSION_STR="${LATEST_TAG#v}"
+        VERSION_FLAG="-ldflags=-X main.version=${VERSION_STR}"
+        info "Injecting version: ${VERSION_STR}"
+    else
+        warn "Could not fetch latest tag; version will show as 'dev'"
+    fi
+
+    GOPROXY="https://goproxy.cn,https://proxy.golang.org,direct" \
+        go install ${VERSION_FLAG:+"$VERSION_FLAG"} "${PKG}@latest"
 
     GOBIN=$(go env GOPATH)/bin
     info "✓ ${BINARY} installed → ${GOBIN}/${BINARY}"
