@@ -275,20 +275,16 @@ BIN_SRC="${TMP_DIR}/${BINARY}"
 [[ -f "$BIN_SRC" ]] || error "Binary not found in archive"
 chmod +x "$BIN_SRC"
 
-# 安装位置：优先无需 sudo 的目录，避免交互式密码输入
-# 1. /usr/local/bin（当前用户有写权限时，如 Homebrew macOS）
-# 2. ~/bin（用户私有目录，无需任何权限）
-INSTALL_DIR=""
-if [[ -w "/usr/local/bin" ]] && mv "$BIN_SRC" "/usr/local/bin/${BINARY}" 2>/dev/null; then
-    INSTALL_DIR="/usr/local/bin"
-    info "✓ ${BINARY} installed → /usr/local/bin/${BINARY}"
-else
+# 安装到用户目录，不需要任何系统权限
+# 优先 ~/.local/bin（XDG 标准），其次 ~/bin
+INSTALL_DIR="$HOME/.local/bin"
+if [[ ! -d "$INSTALL_DIR" ]]; then
     INSTALL_DIR="$HOME/bin"
-    mkdir -p "$INSTALL_DIR"
-    mv "$BIN_SRC" "${INSTALL_DIR}/${BINARY}"
-    info "✓ ${BINARY} installed → ${INSTALL_DIR}/${BINARY}"
-    add_to_path "$INSTALL_DIR"
 fi
+mkdir -p "$INSTALL_DIR"
+mv "$BIN_SRC" "${INSTALL_DIR}/${BINARY}"
+info "✓ ${BINARY} installed → ${INSTALL_DIR}/${BINARY}"
+add_to_path "$INSTALL_DIR"
 
 print_next_steps "$INSTALL_DIR"
 install_listener_service "${INSTALL_DIR}/${BINARY}" "$HOME/.a2hmarket"
