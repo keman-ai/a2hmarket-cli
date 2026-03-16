@@ -61,14 +61,10 @@ func Load() (*Config, error) {
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath(cfg.ConfigDir)
-	viper.AddConfigPath(".")
 	viper.AddConfigPath("/etc/a2hmarket/")
 
-	err := viper.ReadInConfig()
-	if err != nil {
-		// 配置文件不存在，使用默认值
-		common.Debugf("配置文件不存在，使用默认配置: %v", err)
-	}
+	// 找不到配置文件是正常情况，使用默认值即可
+	_ = viper.ReadInConfig()
 
 	// 从环境变量覆盖
 	viper.BindEnv("base_url", "A2H_BASE_URL")
@@ -78,7 +74,7 @@ func Load() (*Config, error) {
 	viper.BindEnv("auth_timeout", "A2H_AUTH_TIMEOUT")
 
 	// 解析配置
-	err = viper.Unmarshal(cfg)
+	err := viper.Unmarshal(cfg)
 	if err != nil {
 		return nil, common.ConfigError("无法解析配置", err)
 	}
