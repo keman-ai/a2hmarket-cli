@@ -77,17 +77,18 @@ func inboxCommand() *cli.Command {
 					&cli.StringFlag{Name: "event-id", Usage: "event ID to retrieve", Required: true},
 				},
 			},
-			{
-				Name:   "check",
-				Usage:  "Health check: unread count, pending push, listener liveness",
-				Action: inboxCheckCmd,
-				Flags: []cli.Flag{
-					&cli.StringFlag{Name: "config-dir", Value: "~/.a2hmarket", Usage: "config directory"},
-					&cli.StringFlag{Name: "consumer-id", Value: "default", Usage: "consumer identifier"},
-				},
+		{
+			Name:   "check",
+			Usage:  "Health check: unread count, pending push, listener liveness",
+			Action: inboxCheckCmd,
+			Flags: []cli.Flag{
+				&cli.StringFlag{Name: "config-dir", Value: "~/.a2hmarket", Usage: "config directory"},
+				&cli.StringFlag{Name: "consumer-id", Value: "default", Usage: "consumer identifier"},
 			},
 		},
-	}
+		inboxHistoryCommand(),
+	},
+}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

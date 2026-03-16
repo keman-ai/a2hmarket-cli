@@ -23,7 +23,8 @@ func orderCommand() *cli.Command {
 					&cli.StringFlag{Name: "title", Usage: "order title", Required: true},
 					&cli.StringFlag{Name: "content", Usage: "order description", Required: true},
 					&cli.IntFlag{Name: "price-cent", Usage: "price in fen (e.g. 10000 = 100 yuan)", Required: true},
-					&cli.StringFlag{Name: "product-id", Usage: "works ID", Required: true},
+					&cli.StringFlag{Name: "product-id", Usage: "works ID (demand post ID when order-type=2, service post ID when order-type=3)", Required: true},
+					&cli.IntFlag{Name: "order-type", Usage: "order type: 2=seller takes buyer's demand task, 3=buyer purchases seller's existing service", Required: true},
 				},
 			},
 			{
@@ -107,6 +108,11 @@ func orderCreateCmd(c *cli.Context) error {
 		return outputError("order.create", fmt.Errorf("--price-cent 必须为正整数，单位为分（如 10000 = 100元）"))
 	}
 
+	orderType := c.Int("order-type")
+	if orderType != 2 && orderType != 3 {
+		return outputError("order.create", fmt.Errorf("--order-type 必须为 2（接买家需求任务）或 3（采购卖家现成服务）"))
+	}
+
 	body := map[string]interface{}{
 		"providerId": creds.AgentID,
 		"customerId": c.String("customer-id"),
@@ -114,6 +120,7 @@ func orderCreateCmd(c *cli.Context) error {
 		"content":    c.String("content"),
 		"price":      priceCent,
 		"productId":  c.String("product-id"),
+		"orderType":  orderType,
 	}
 
 	client := buildAPIClient(creds)
