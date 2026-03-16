@@ -84,8 +84,9 @@ func updateCmd(c *cli.Context) error {
 }
 
 func fetchLatestTag() (string, error) {
+	// 代理需配置 /github/api/ -> api.github.com/，见 docs/nginx-github-api-proxy.conf
 	urls := []string{
-		fmt.Sprintf("%s/repos/%s/%s/releases/latest", a2hProxy, repoOwner, repoName),
+		fmt.Sprintf("%s/api/repos/%s/%s/releases/latest", a2hProxy, repoOwner, repoName),
 		fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", repoOwner, repoName),
 	}
 
