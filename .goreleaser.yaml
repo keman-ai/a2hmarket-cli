@@ -17,12 +17,13 @@ builds:
     goarch:
       - amd64
       - arm64
-    # 针对 macOS 的通用二进制支持
     ignore:
       - goos: windows
         goarch: arm64
     main: ./cmd/a2hmarket-cli
     binary: a2hmarket-cli
+    ldflags:
+      - -s -w -X main.version={{.Version}}
 
 archives:
   - format: tar.gz

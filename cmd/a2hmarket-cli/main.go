@@ -9,6 +9,9 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
+// version is set at build time via ldflags by GoReleaser; defaults to "dev" for local builds.
+var version = "dev"
+
 func main() {
 	// 加载配置，确保 ~/.a2hmarket 目录存在，并初始化日志文件
 	cfg, err := config.Load()
@@ -22,7 +25,7 @@ func main() {
 	app := &cli.App{
 		Name:    "a2hmarket-cli",
 		Usage:   "a2hmarket CLI — authentication, messaging and listener daemon",
-		Version: "0.1.2",
+		Version: version,
 		Commands: []*cli.Command{
 			genAuthCodeCommand(),
 			getAuthCommand(),
@@ -37,6 +40,7 @@ func main() {
 			fileCommand(),
 			statusCommand(),
 			apiCallCommand(),
+			updateCommand(),
 		},
 	}
 
