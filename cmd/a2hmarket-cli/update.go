@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/keman-ai/a2hmarket-cli/internal/common"
 	"github.com/urfave/cli/v2"
@@ -88,7 +89,7 @@ func fetchLatestTag() (string, error) {
 		fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", repoOwner, repoName),
 	}
 
-	client := &http.Client{Timeout: 15}
+	client := &http.Client{Timeout: 15 * time.Second}
 	for _, u := range urls {
 		resp, err := client.Get(u)
 		if err != nil {

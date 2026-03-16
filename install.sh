@@ -275,14 +275,13 @@ BIN_SRC="${TMP_DIR}/${BINARY}"
 [[ -f "$BIN_SRC" ]] || error "Binary not found in archive"
 chmod +x "$BIN_SRC"
 
-# 安装位置：优先 /usr/local/bin（无需修改 PATH），回退到 ~/bin
+# 安装位置：优先无需 sudo 的目录，避免交互式密码输入
+# 1. /usr/local/bin（当前用户有写权限时，如 Homebrew macOS）
+# 2. ~/bin（用户私有目录，无需任何权限）
 INSTALL_DIR=""
-if mv "$BIN_SRC" "/usr/local/bin/${BINARY}" 2>/dev/null; then
+if [[ -w "/usr/local/bin" ]] && mv "$BIN_SRC" "/usr/local/bin/${BINARY}" 2>/dev/null; then
     INSTALL_DIR="/usr/local/bin"
     info "✓ ${BINARY} installed → /usr/local/bin/${BINARY}"
-elif sudo mv "$BIN_SRC" "/usr/local/bin/${BINARY}" 2>/dev/null; then
-    INSTALL_DIR="/usr/local/bin"
-    info "✓ ${BINARY} installed → /usr/local/bin/${BINARY} (via sudo)"
 else
     INSTALL_DIR="$HOME/bin"
     mkdir -p "$INSTALL_DIR"
