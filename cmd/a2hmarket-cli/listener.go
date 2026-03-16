@@ -261,7 +261,7 @@ func listenerRunCmd(c *cli.Context) error {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 	reloadCh := make(chan os.Signal, 1)
-	signal.Notify(reloadCh, syscall.SIGUSR1)
+	reloadEnabled := registerReloadSignal(reloadCh)
 
 	a2aDispatchCfg := dispatcher.A2ADispatchConfig{
 		BatchSize:  50,
@@ -280,6 +280,9 @@ func listenerRunCmd(c *cli.Context) error {
 			return nil
 
 		case <-reloadCh:
+			if !reloadEnabled {
+				continue
+			}
 			newCreds, err := loadCreds(configDir)
 			if err != nil {
 				common.Warnf("reload: failed to read credentials: %v", err)
@@ -463,7 +466,7 @@ func listenerReloadCmd(c *cli.Context) error {
 		return fmt.Errorf("process not found (pid=%d): %w", pid, err)
 	}
 
-	if err := proc.Signal(syscall.SIGUSR1); err != nil {
+	if err := sendReloadSignal(proc); err != nil {
 		return fmt.Errorf("failed to send reload signal (pid=%d): %w", pid, err)
 	}
 
