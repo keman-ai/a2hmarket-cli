@@ -238,6 +238,13 @@ func listenerRunCmd(c *cli.Context) error {
 	heartbeatTicker := time.NewTicker(15 * time.Second)
 	defer heartbeatTicker.Stop()
 
+	// Follower poll ticker (20s) — follower periodically calls acquire so it
+	// can detect when the current leader's lease expires or a takeover targets
+	// this instance. When acquire returns leader, exit cleanly so the process
+	// manager restarts us in leader mode (fresh clientId + subscribe).
+	followerPollTicker := time.NewTicker(20 * time.Second)
+	defer followerPollTicker.Stop()
+
 	// Flush ticker (5s) — flushes a2a_outbox when leader.
 	flushTicker := time.NewTicker(5 * time.Second)
 	defer flushTicker.Stop()
@@ -284,6 +291,26 @@ func listenerRunCmd(c *cli.Context) error {
 			epoch = hbResult.Epoch
 			leaseUntil = hbResult.LeaseUntil
 			common.Debugf("heartbeat ok epoch=%d leaseUntil=%d", epoch, leaseUntil)
+
+		case <-followerPollTicker.C:
+			// Only followers poll. Leaders use the heartbeat path above.
+			if role != lease.RoleFollower {
+				continue
+			}
+			pollResult, err := leaseClient.Acquire(acquireReq)
+			if err != nil {
+				common.Debugf("follower poll failed: %v", err)
+				continue
+			}
+			if pollResult.Role == lease.RoleLeader {
+				// We won the lease (previous leader expired or takeover targeted us).
+				// Exit cleanly so the daemon restarts us in leader mode with the
+				// base clientId and an active MQTT subscription.
+				common.Infof("follower promoted to leader (epoch=%d) — restarting as leader", pollResult.Epoch)
+				fmt.Println("\nShutting down listener... (promoted to leader, restarting)")
+				return nil
+			}
+			common.Debugf("follower poll: still follower, leader=%s", pollResult.LeaderInstanceID)
 
 		case <-flushTicker.C:
 			// Only the leader (or standalone) flushes outboxes.
