@@ -201,46 +201,9 @@ print_next_steps() {
 # 安装前先停掉托管服务并杀旧进程，再装新二进制、写新 unit 并 load/start
 stop_listener_before_install
 
-# ── 1. 优先用 go install（开发者路径）────────────────────────
-if command -v go >/dev/null 2>&1; then
-    info "Found Go $(go version | awk '{print $3}'), installing via go install..."
-
-    # 获取最新 release tag，用于注入版本号；失败则回退到 "dev"
-    LATEST_TAG=""
-    for api_url in \
-        "${A2H_PROXY}/repos/${REPO}/releases/latest" \
-        "https://api.github.com/repos/${REPO}/releases/latest"; do
-        tag=$(curl -fsSL --connect-timeout 5 "$api_url" 2>/dev/null \
-              | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\(.*\)".*/\1/')
-        if [[ -n "$tag" ]]; then
-            LATEST_TAG="$tag"
-            break
-        fi
-    done
-
-    VERSION_FLAG=""
-    if [[ -n "$LATEST_TAG" ]]; then
-        # 去掉前导 v，与 var version 的格式一致（如 "1.1.2"）
-        VERSION_STR="${LATEST_TAG#v}"
-        VERSION_FLAG="-ldflags=-X main.version=${VERSION_STR}"
-        info "Injecting version: ${VERSION_STR}"
-    else
-        warn "Could not fetch latest tag; version will show as 'dev'"
-    fi
-
-    GOPROXY="https://goproxy.cn,https://proxy.golang.org,direct" \
-        go install ${VERSION_FLAG:+"$VERSION_FLAG"} "${PKG}@latest"
-
-    GOBIN=$(go env GOPATH)/bin
-    info "✓ ${BINARY} installed → ${GOBIN}/${BINARY}"
-    add_to_path "$GOBIN"
-    print_next_steps "$GOBIN"
-    install_listener_service "${GOBIN}/${BINARY}" "$HOME/.a2hmarket"
-    exit 0
-fi
-
-# ── 2. 无 Go 环境：下载预编译二进制 ──────────────────────────
-info "Go not found, downloading pre-compiled binary..."
+# ── 下载预编译二进制（优先 A2H_PROXY，回退 GitHub 直连）──────
+# go install 依赖 GOPROXY，国内不稳定；预编译二进制走自建代理更可靠。
+info "Downloading pre-compiled binary..."
 
 # 探测系统平台
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
