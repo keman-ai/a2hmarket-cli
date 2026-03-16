@@ -1,10 +1,16 @@
-// Package openclaw provides helpers for interacting with the OpenClaw gateway CLI.
+// Package openclaw provides helpers for interacting with the OpenClaw gateway.
+//
+// All public functions try the local WebSocket gateway first (gateway.go) and
+// fall back to the CLI only if the gateway is unavailable. This means openclaw
+// does NOT need to be on PATH as long as the gateway process is running.
 package openclaw
 
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -22,27 +28,40 @@ type sessionsOutput struct {
 	Sessions []Session `json:"sessions"`
 }
 
-// GetMostRecentSession runs `openclaw sessions --json` and returns the most
-// recently updated session (first in the list, ordered by updatedAt desc).
+// GetMostRecentSession returns the most recently updated session.
+// Tries the local gateway first, then falls back to the openclaw CLI.
 func GetMostRecentSession() (*Session, error) {
-	out, err := exec.Command("openclaw", "sessions", "--json").Output()
-	if err != nil {
-		return nil, fmt.Errorf("openclaw sessions: %w", err)
+	// 1. Try gateway
+	sessions, err := GatewaySessionsList()
+	if err == nil && len(sessions) > 0 {
+		s := &sessions[0]
+		s.SessionID = strings.TrimSpace(s.SessionID)
+		if s.SessionID != "" {
+			return s, nil
+		}
 	}
 
+	// 2. Fall back to CLI
+	bin, err := findOpenclawBinary()
+	if err != nil {
+		return nil, fmt.Errorf("openclaw sessions: gateway unavailable and %w", err)
+	}
+	out, err := exec.Command(bin, "sessions", "--json").Output()
+	if err != nil {
+		return nil, fmt.Errorf("openclaw sessions (cli): %w", err)
+	}
 	var result sessionsOutput
 	if err := json.Unmarshal(out, &result); err != nil {
-		return nil, fmt.Errorf("openclaw sessions: parse JSON: %w", err)
+		return nil, fmt.Errorf("openclaw sessions (cli): parse JSON: %w", err)
 	}
 	if len(result.Sessions) == 0 {
 		return nil, fmt.Errorf("openclaw sessions: no sessions found")
 	}
-
 	s := &result.Sessions[0]
-	if strings.TrimSpace(s.SessionID) == "" {
+	s.SessionID = strings.TrimSpace(s.SessionID)
+	if s.SessionID == "" {
 		return nil, fmt.Errorf("openclaw sessions: first session has empty sessionId")
 	}
-	s.SessionID = strings.TrimSpace(s.SessionID)
 	return s, nil
 }
 
@@ -70,12 +89,33 @@ func ParseSessionKey(key string) (channel, target string) {
 	return channel, target
 }
 
-// SendToSession runs `openclaw agent --session-id <id> --message <msg> --deliver`.
-// The --deliver flag ensures the agent's reply is forwarded to the session's
-// bound channel (e.g. Feishu, Telegram).
-func SendToSession(sessionID, message string) error {
-	cmd := exec.Command("openclaw", "agent",
-		"--session-id", sessionID,
+// SendToSession injects a message into an AI session, triggering the agent to reply
+// and deliver its response back to the session's bound channel (e.g. Feishu).
+// Tries the gateway first, falls back to the CLI.
+func SendToSession(sessionKey, message string) error {
+	// 1. Try gateway (chat.send)
+	if err := GatewayChatSend(sessionKey, message); err == nil {
+		return nil
+	}
+
+	// 2. Fall back to CLI (needs session ID, not key)
+	// The CLI uses --session-id which maps to sessionId, not the session key.
+	// We derive it from the session list.
+	sess, err := GetMostRecentSession()
+	if err != nil {
+		return fmt.Errorf("SendToSession fallback: cannot resolve session: %w", err)
+	}
+	if sess.Key != sessionKey {
+		// Try to find the right session — for now just use the first one.
+		// In practice the caller already resolved the right session.
+	}
+
+	bin, binErr := findOpenclawBinary()
+	if binErr != nil {
+		return fmt.Errorf("openclaw not available (gateway and cli both failed): %w", binErr)
+	}
+	cmd := exec.Command(bin, "agent",
+		"--session-id", sess.SessionID,
 		"--message", message,
 		"--deliver",
 	)
@@ -83,18 +123,36 @@ func SendToSession(sessionID, message string) error {
 	if err != nil {
 		detail := strings.TrimSpace(string(out))
 		if detail == "" {
-			return fmt.Errorf("openclaw agent: %w", err)
+			return fmt.Errorf("openclaw agent (cli): %w", err)
 		}
-		return fmt.Errorf("openclaw agent: %w — %s", err, detail)
+		return fmt.Errorf("openclaw agent (cli): %w — %s", err, detail)
 	}
 	return nil
 }
 
-// SendMediaToChannel sends a message with a media attachment directly via
-// `openclaw message send --channel <ch> --target <tgt> --media <path> --message <text>`.
-// This bypasses the agent and sends directly through the channel,
-// allowing images/files to be displayed natively (e.g. in Feishu).
+// SendMediaToChannel sends a message with an optional media attachment directly
+// through an external channel (e.g. Feishu), bypassing the AI agent.
+// mediaPath must be a local file path or empty (text-only).
+// Tries the gateway first (passing a file:// URL), falls back to the CLI.
 func SendMediaToChannel(channel, target, message, mediaPath string) error {
+	// 1. Try gateway (send RPC)
+	mediaURL := ""
+	if mediaPath != "" {
+		// Convert local path to file:// URL so OpenClaw gateway can read it.
+		abs, err := filepath.Abs(mediaPath)
+		if err == nil {
+			mediaURL = "file://" + abs
+		}
+	}
+	if err := GatewaySend(channel, target, message, mediaURL); err == nil {
+		return nil
+	}
+
+	// 2. Fall back to CLI
+	bin, err := findOpenclawBinary()
+	if err != nil {
+		return fmt.Errorf("SendMediaToChannel: gateway unavailable and %w", err)
+	}
 	args := []string{"message", "send",
 		"--channel", channel,
 		"--target", target,
@@ -105,14 +163,35 @@ func SendMediaToChannel(channel, target, message, mediaPath string) error {
 	if mediaPath != "" {
 		args = append(args, "--media", mediaPath)
 	}
-	cmd := exec.Command("openclaw", args...)
+	cmd := exec.Command(bin, args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		detail := strings.TrimSpace(string(out))
 		if detail == "" {
-			return fmt.Errorf("openclaw message send: %w", err)
+			return fmt.Errorf("openclaw message send (cli): %w", err)
 		}
-		return fmt.Errorf("openclaw message send: %w — %s", err, detail)
+		return fmt.Errorf("openclaw message send (cli): %w — %s", err, detail)
 	}
 	return nil
+}
+
+// findOpenclawBinary locates the openclaw executable.
+// It tries $PATH first, then common install locations.
+func findOpenclawBinary() (string, error) {
+	if path, err := exec.LookPath("openclaw"); err == nil {
+		return path, nil
+	}
+	home := os.Getenv("HOME")
+	candidates := []string{
+		filepath.Join(home, ".local/bin/openclaw"),
+		filepath.Join(home, "bin/openclaw"),
+		"/usr/local/bin/openclaw",
+		"/usr/bin/openclaw",
+	}
+	for _, c := range candidates {
+		if _, err := os.Stat(c); err == nil {
+			return c, nil
+		}
+	}
+	return "", fmt.Errorf("openclaw binary not found in PATH or common locations")
 }

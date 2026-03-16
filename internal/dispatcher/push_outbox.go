@@ -116,7 +116,7 @@ func dispatchRow(row store.PushOutboxRow, session *openclaw.Session, channel, ta
 
 	if att == nil {
 		text := openclaw.FormatPushText(row)
-		return openclaw.SendToSession(session.SessionID, text)
+		return openclaw.SendToSession(session.Key, text)
 	}
 
 	if channel != "" && target != "" {
@@ -124,7 +124,7 @@ func dispatchRow(row store.PushOutboxRow, session *openclaw.Session, channel, ta
 	}
 
 	text := openclaw.FormatExternalURLText(row, att)
-	return openclaw.SendToSession(session.SessionID, text)
+	return openclaw.SendToSession(session.Key, text)
 }
 
 // dispatchWithMedia downloads the attachment and sends it via openclaw message send.
@@ -133,7 +133,7 @@ func dispatchWithMedia(row store.PushOutboxRow, att *openclaw.AttachmentInfo, ch
 	if dlErr != nil {
 		common.Warnf("push: download failed (%s), falling back to URL text: %v", att.Name, dlErr)
 		text := openclaw.FormatExternalURLText(row, att)
-		return openclaw.SendToSession(session.SessionID, text)
+		return openclaw.SendToSession(session.Key, text)
 	}
 
 	common.Debugf("push: downloaded %s → %s", att.Name, localPath)
@@ -143,7 +143,7 @@ func dispatchWithMedia(row store.PushOutboxRow, att *openclaw.AttachmentInfo, ch
 	if sendErr != nil {
 		common.Warnf("push: media send failed, falling back to agent: %v", sendErr)
 		text := openclaw.FormatExternalURLText(row, att)
-		return openclaw.SendToSession(session.SessionID, text)
+		return openclaw.SendToSession(session.Key, text)
 	}
 	return nil
 }
