@@ -44,6 +44,23 @@ func FlushPushOutbox(ctx context.Context, es *store.EventStore, cfg PushDispatch
 
 	nowUnixMs := time.Now().UnixMilli()
 
+	// Phase 1: Clean up SENT rows (push_once mode — ported from JS push-dispatcher.js:90-131).
+	// Messages are pushed once to the AI session; we don't wait for consumer ACK.
+	sentRows, err := es.ListSentPushOutbox(ctx, cfg.BatchSize)
+	if err == nil {
+		for _, row := range sentRows {
+			dbCtx, dbCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			if err := es.MarkPushAcked(dbCtx, row.OutboxID, row.EventID); err != nil {
+				common.Debugf("push: ack cleanup failed event_id=%s: %v", row.EventID, err)
+			}
+			dbCancel()
+		}
+		if len(sentRows) > 0 {
+			common.Debugf("push: cleaned up %d SENT rows (push_once)", len(sentRows))
+		}
+	}
+
+	// Phase 2: Dispatch PENDING/RETRY rows.
 	rows, err := es.ListPendingPushOutbox(ctx, nowUnixMs, cfg.BatchSize)
 	if err != nil {
 		return PushStats{}, err
