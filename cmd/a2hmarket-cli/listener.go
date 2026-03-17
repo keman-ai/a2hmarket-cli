@@ -109,7 +109,7 @@ func listenCmd(c *cli.Context) error {
 		printMessage(msg, verbose)
 	})
 	transport.OnReconnect(func() {
-		fmt.Println("[reconnected]")
+		common.Infof("reconnected")
 	})
 
 	if err := transport.Connect(); err != nil {
@@ -121,9 +121,9 @@ func listenCmd(c *cli.Context) error {
 		return fmt.Errorf("mqtt subscribe: %w", err)
 	}
 
-	fmt.Printf("Listening for messages on %s (agent=%s, instance=%s)\n",
+	common.Infof("Listening for messages on %s (agent=%s, instance=%s)",
 		mqttpkg.IncomingTopic(creds.AgentID), creds.AgentID, instanceID)
-	fmt.Println("Press Ctrl+C to stop.")
+	common.Infof("Press Ctrl+C to stop.")
 
 	waitForSignal()
 	return nil
@@ -226,7 +226,7 @@ func listenerRunCmd(c *cli.Context) error {
 	})
 
 	transport.OnReconnect(func() {
-		fmt.Println("[reconnected — resubscribing]")
+		common.Infof("reconnected — resubscribing")
 	})
 
 	if err := transport.Connect(); err != nil {
@@ -240,7 +240,7 @@ func listenerRunCmd(c *cli.Context) error {
 		}
 	}
 
-	fmt.Printf("Listener started  instance=%s  role=%s  agent=%s  push=%v\n",
+	common.Infof("Listener started  instance=%s  role=%s  agent=%s  push=%v",
 		instanceID, role, creds.AgentID, pushEnabled)
 
 	// Heartbeat ticker (15s) — sends heartbeat to lease control plane.
@@ -279,7 +279,7 @@ func listenerRunCmd(c *cli.Context) error {
 	for {
 		select {
 		case <-sigCh:
-			fmt.Println("\nShutting down listener...")
+			common.Infof("Shutting down listener...")
 			waitDone := make(chan struct{})
 			go func() {
 				pushWg.Wait()
@@ -304,7 +304,6 @@ func listenerRunCmd(c *cli.Context) error {
 			}
 			pushEnabled = newCreds.PushEnabled
 			common.Infof("reload: push_enabled=%v", pushEnabled)
-			fmt.Printf("Config reloaded: push_enabled=%v\n", pushEnabled)
 
 		case <-heartbeatTicker.C:
 			if role != lease.RoleLeader {
@@ -323,7 +322,7 @@ func listenerRunCmd(c *cli.Context) error {
 				// connect with a suffixed clientId — no more MQTT contention.
 				common.Warnf("heartbeat revoked (reason=%s) — unsubscribing and shutting down", hbResult.Reason)
 				transport.Unsubscribe()
-				fmt.Println("\nShutting down listener... (lease revoked, restart to run as follower)")
+				common.Infof("Shutting down listener (lease revoked, restart to run as follower)")
 				return nil
 			}
 			epoch = hbResult.Epoch
@@ -345,7 +344,6 @@ func listenerRunCmd(c *cli.Context) error {
 				// Exit cleanly so the daemon restarts us in leader mode with the
 				// base clientId and an active MQTT subscription.
 				common.Infof("follower promoted to leader (epoch=%d) — restarting as leader", pollResult.Epoch)
-				fmt.Println("\nShutting down listener... (promoted to leader, restarting)")
 				return nil
 			}
 			common.Debugf("follower poll: still follower, leader=%s", pollResult.LeaderInstanceID)
@@ -498,24 +496,22 @@ func listenerReloadCmd(c *cli.Context) error {
 func printMessage(msg mqttpkg.Message, verbose bool) {
 	env, err := protocol.ParseEnvelope(msg.Payload)
 	if err != nil {
-		fmt.Printf("[%s] raw topic=%s payload=%s\n",
-			time.Now().Format(time.TimeOnly), msg.Topic, trimStr(msg.Payload, 200))
+		common.Debugf("raw topic=%s payload=%s", msg.Topic, trimStr(msg.Payload, 200))
 		return
 	}
 
-	ts := time.Now().Format(time.DateTime)
 	if verbose {
 		out, _ := json.MarshalIndent(env, "", "  ")
-		fmt.Printf("[%s] envelope:\n%s\n", ts, string(out))
+		common.Debugf("envelope: %s", string(out))
 		return
 	}
 
 	text, _ := env.Payload["text"].(string)
-	fmt.Printf("[%s] from=%s type=%s msg_id=%s", ts, env.SenderID, env.MessageType, env.MessageID)
 	if text != "" {
-		fmt.Printf(" text=%q", text)
+		common.Debugf("from=%s type=%s msg_id=%s text=%q", env.SenderID, env.MessageType, env.MessageID, text)
+	} else {
+		common.Debugf("from=%s type=%s msg_id=%s", env.SenderID, env.MessageType, env.MessageID)
 	}
-	fmt.Println()
 }
 
 func waitForSignal() {

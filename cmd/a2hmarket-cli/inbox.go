@@ -386,6 +386,28 @@ func inboxGetCmd(c *cli.Context) error {
 		return outputError("inbox.get", fmt.Errorf("event not found: %s", eventID))
 	}
 
+	// Fill delivery target from OpenClaw sessions if not set on the event.
+	targetSessionKey := ev.TargetSessionKey
+	deliveryChannel := ""
+	deliveryTo := ""
+	if targetSessionKey != "" {
+		deliveryChannel, deliveryTo = openclaw.ParseSessionKey(targetSessionKey)
+	}
+	if deliveryChannel == "" || deliveryTo == "" {
+		if ds, _ := openclaw.FindMostRecentDeliverableSession(); ds != nil {
+			if targetSessionKey == "" {
+				targetSessionKey = ds.Key
+			}
+			ch, tgt := openclaw.ParseSessionKey(ds.Key)
+			if deliveryChannel == "" {
+				deliveryChannel = ch
+			}
+			if deliveryTo == "" {
+				deliveryTo = tgt
+			}
+		}
+	}
+
 	return outputOK("inbox.get", map[string]interface{}{
 		"seq":                ev.Seq,
 		"event_id":           ev.EventID,
@@ -397,7 +419,9 @@ func inboxGetCmd(c *cli.Context) error {
 		"source":             ev.Source,
 		"a2a_message_id":     ev.A2AMessageID,
 		"target_session_id":  ev.TargetSessionID,
-		"target_session_key": ev.TargetSessionKey,
+		"target_session_key": targetSessionKey,
+		"delivery_channel":   omitEmpty(deliveryChannel),
+		"delivery_to":        omitEmpty(deliveryTo),
 		"created_at":         ev.CreatedAt,
 		"updated_at":         ev.UpdatedAt,
 		"payload":            ev.Payload,
