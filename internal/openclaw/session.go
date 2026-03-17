@@ -6,6 +6,7 @@
 package openclaw
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -57,9 +58,24 @@ func GetMostRecentSession() (*Session, error) {
 	if err != nil {
 		return nil, fmt.Errorf("openclaw sessions (cli): %w", err)
 	}
+	// The CLI may output multiple JSON values or extra text.
+	// Try to extract the first valid JSON object or array from the output.
+	raw := extractJSON(out)
+	if raw == nil {
+		return nil, fmt.Errorf("openclaw sessions (cli): parse JSON: no valid JSON found in output: %s", string(out[:min(200, len(out))]))
+	}
+
+	// Try wrapper format first: {"sessions": [...]}
 	var result sessionsOutput
-	if err := json.Unmarshal(out, &result); err != nil {
-		return nil, fmt.Errorf("openclaw sessions (cli): parse JSON: %w", err)
+	if err := json.Unmarshal(raw, &result); err == nil && len(result.Sessions) > 0 {
+		// success
+	} else {
+		// Fallback: response is directly an array of sessions
+		var list []Session
+		if err := json.Unmarshal(raw, &list); err != nil {
+			return nil, fmt.Errorf("openclaw sessions (cli): parse JSON: %w", err)
+		}
+		result.Sessions = list
 	}
 	if len(result.Sessions) == 0 {
 		return nil, fmt.Errorf("openclaw sessions: no sessions found")
@@ -234,6 +250,26 @@ func findNodeBinary() string {
 		}
 	}
 	return ""
+}
+
+// extractJSON finds the first complete JSON object or array in raw output.
+// This handles CLI output that may contain log lines or multiple JSON values.
+func extractJSON(data []byte) []byte {
+	// Find the first '{' or '[' that starts a valid JSON value.
+	for _, opener := range []byte{'{', '['} {
+		idx := bytes.IndexByte(data, opener)
+		if idx < 0 {
+			continue
+		}
+		candidate := data[idx:]
+		// Use json.Decoder to read exactly one value.
+		dec := json.NewDecoder(bytes.NewReader(candidate))
+		var raw json.RawMessage
+		if err := dec.Decode(&raw); err == nil {
+			return []byte(raw)
+		}
+	}
+	return nil
 }
 
 // enrichedEnv returns os.Environ() with the node binary's directory prepended to PATH,

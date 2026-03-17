@@ -270,7 +270,12 @@ func openGatewaySession() (*gwSession, error) {
 	if err != nil {
 		return nil, err
 	}
-	authToken := gwLoadAuthToken(gwRole)
+	// Primary: use token from openclaw.json (single source of truth).
+	// Fallback: device-auth.json for backward compat with older setups.
+	authToken := cfg.Gateway.Auth.Token
+	if authToken == "" {
+		authToken = gwLoadAuthToken(gwRole)
+	}
 
 	url := fmt.Sprintf("ws://127.0.0.1:%d", cfg.Gateway.Port)
 	dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second}
