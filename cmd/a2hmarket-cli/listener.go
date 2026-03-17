@@ -275,6 +275,10 @@ func listenerRunCmd(c *cli.Context) error {
 		MaxDelayMs: 300_000,
 		WaitGroup:  &pushWg,
 	}
+	mediaDispatchCfg := dispatcher.MediaDispatchConfig{
+		BatchSize:  20,
+		MaxRetries: 10,
+	}
 
 	for {
 		select {
@@ -377,6 +381,18 @@ func listenerRunCmd(c *cli.Context) error {
 					common.Warnf("push flush: session unavailable, skipped=%d (will retry next tick)", pushStats.Skipped)
 				} else if pushStats.Sent > 0 || pushStats.Retried > 0 {
 					common.Infof("push flush: sent=%d retried=%d", pushStats.Sent, pushStats.Retried)
+				}
+			}
+
+			// Flush media_outbox → external channel (e.g. Feishu).
+			{
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				mediaStats, err := dispatcher.FlushMediaOutbox(ctx, es, mediaDispatchCfg)
+				cancel()
+				if err != nil {
+					common.Warnf("media flush error: %v", err)
+				} else if mediaStats.Sent > 0 || mediaStats.Retried > 0 || mediaStats.Failed > 0 {
+					common.Infof("media flush: sent=%d retried=%d failed=%d", mediaStats.Sent, mediaStats.Retried, mediaStats.Failed)
 				}
 			}
 		}
