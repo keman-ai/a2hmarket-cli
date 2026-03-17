@@ -516,26 +516,36 @@ func isListenerAlive(pidFilePath string) bool {
 	return proc.Signal(syscall.Signal(0)) == nil
 }
 
-// extractPaymentQrFromPayload extracts payment_qr (or legacy image) from event payload.
+// extractPaymentQrFromPayload extracts payment_qr URL from event payload.
+// Checks structured fields first, then falls back to parsing text for
+// "[收款二维码]: <url>" patterns (some agents embed QR URLs in markdown text).
 func extractPaymentQrFromPayload(payload map[string]interface{}) string {
 	if payload == nil {
 		return ""
 	}
-	// Try full envelope format (envelope.payload.payment_qr).
+	// Try full envelope format (envelope.payload.*).
 	if inner, ok := payload["payload"].(map[string]interface{}); ok {
-		if v, ok := inner["payment_qr"].(string); ok && strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
-		}
-		if v, ok := inner["image"].(string); ok && strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
+		if url := extractQrFromMap(inner); url != "" {
+			return url
 		}
 	}
 	// Bare payload format.
-	if v, ok := payload["payment_qr"].(string); ok && strings.TrimSpace(v) != "" {
+	return extractQrFromMap(payload)
+}
+
+func extractQrFromMap(p map[string]interface{}) string {
+	// Structured fields
+	if v, ok := p["payment_qr"].(string); ok && strings.TrimSpace(v) != "" {
 		return strings.TrimSpace(v)
 	}
-	if v, ok := payload["image"].(string); ok && strings.TrimSpace(v) != "" {
+	if v, ok := p["image"].(string); ok && strings.TrimSpace(v) != "" {
 		return strings.TrimSpace(v)
+	}
+	// Parse from text — "[收款二维码]: <url>"
+	if text, ok := p["text"].(string); ok {
+		if m := openclaw.QrInTextRe.FindStringSubmatch(text); len(m) > 1 {
+			return strings.TrimSpace(m[1])
+		}
 	}
 	return ""
 }

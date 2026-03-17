@@ -2,6 +2,7 @@ package openclaw
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/keman-ai/a2hmarket-cli/internal/store"
@@ -137,9 +138,24 @@ func extractBody(row store.PushOutboxRow) string {
 	return row.Preview
 }
 
+// QrInTextRe matches "[收款二维码]: <url>" or "[收款二维码](<url>)" patterns in text.
+var QrInTextRe = regexp.MustCompile(`\[收款二维码\][\s:：]*\(?(https?://\S+?)[\s)\]]*(?:\s|$)`)
+
 func extractQR(p map[string]interface{}) string {
+	// 1. Structured field (standard)
 	if v, ok := p["payment_qr"].(string); ok && strings.TrimSpace(v) != "" {
 		return strings.TrimSpace(v)
+	}
+	// 2. Legacy field
+	if v, ok := p["image"].(string); ok && strings.TrimSpace(v) != "" {
+		return strings.TrimSpace(v)
+	}
+	// 3. Extract from text — some agents embed QR URL in markdown text
+	//    e.g. "[收款二维码]: https://...image.png"
+	if text, ok := p["text"].(string); ok {
+		if m := QrInTextRe.FindStringSubmatch(text); len(m) > 1 {
+			return strings.TrimSpace(m[1])
+		}
 	}
 	return ""
 }
