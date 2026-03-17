@@ -264,10 +264,34 @@ func inboxAckCmd(c *cli.Context) error {
 				}
 			}
 
+			// Fallback: look up peer→session binding from peer_session_route table.
+			// This covers the case where the ack comes from a system session (e.g.
+			// node-host, control-ui) that has no feishu routing info, but the peer
+			// was previously bound to a feishu session during inbox pull.
+			if (resolvedChannel == "" || resolvedTo == "") && event != nil && event.PeerID != "" {
+				route, _ := es.FindA2aReplyRoute(ctx, event.PeerID, "")
+				if route != nil && route.SessionKey != "" {
+					if hints := a2a.ParseDeliveryHintsFromSessionKey(route.SessionKey); hints != nil {
+						if resolvedChannel == "" {
+							resolvedChannel = hints.Channel
+						}
+						if resolvedTo == "" {
+							resolvedTo = hints.To
+						}
+					}
+				}
+			}
+
 			if resolvedChannel != "" && resolvedTo != "" {
 				inferKey := sessKey
 				if inferKey == "" && event != nil {
 					inferKey = event.TargetSessionKey
+				}
+				// Fallback: use session key from peer route binding.
+				if inferKey == "" && event != nil && event.PeerID != "" {
+					if route, _ := es.FindA2aReplyRoute(ctx, event.PeerID, ""); route != nil {
+						inferKey = route.SessionKey
+					}
 				}
 				enqResult, enqErr := es.EnqueueMediaOutbox(ctx, store.MediaEnqueueInput{
 					EventID:     eventID,

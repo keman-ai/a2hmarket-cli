@@ -170,22 +170,32 @@ func downloadAndReplace(binPath, tag string) error {
 		baseURL,
 	}
 
+	// 下载超时 5 分钟（二进制文件较大，国内网络可能较慢）
+	dlClient := &http.Client{Timeout: 5 * time.Minute}
+
 	var body io.ReadCloser
+	var dlURL string
 	for _, u := range urls {
-		resp, err := http.Get(u)
-		if err != nil || resp.StatusCode != http.StatusOK {
-			if resp != nil {
-				resp.Body.Close()
-			}
+		common.Infof("尝试下载: %s", u)
+		resp, err := dlClient.Get(u)
+		if err != nil {
+			common.Debugf("下载失败: %s -> %v", u, err)
+			continue
+		}
+		if resp.StatusCode != http.StatusOK {
+			common.Debugf("下载失败: %s -> HTTP %d", u, resp.StatusCode)
+			resp.Body.Close()
 			continue
 		}
 		body = resp.Body
+		dlURL = u
 		break
 	}
 	if body == nil {
 		return fmt.Errorf("下载失败，请检查网络或访问 https://github.com/%s/%s/releases", repoOwner, repoName)
 	}
 	defer body.Close()
+	common.Infof("下载中: %s", dlURL)
 
 	tmpDir, err := os.MkdirTemp("", "a2hmarket-cli-update-*")
 	if err != nil {
