@@ -26,17 +26,6 @@ jobs:
         with:
           go-version: "stable"
 
-      - name: Import Apple signing certificate
-        env:
-          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_DEV_ID_APP: ${{ secrets.APPLE_DEV_ID_APP }}
-          APPLE_KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
-          APPLE_NOTARY_APPLE_ID: ${{ secrets.APPLE_NOTARY_APPLE_ID }}
-          APPLE_NOTARY_APP_PASSWORD: ${{ secrets.APPLE_NOTARY_APP_PASSWORD }}
-          APPLE_NOTARY_TEAM_ID: ${{ secrets.APPLE_NOTARY_TEAM_ID }}
-        run: ./scripts/import-apple-certificate.sh
-
       - name: Build release artifacts
         uses: goreleaser/goreleaser-action@v6
         with:
@@ -45,14 +34,6 @@ jobs:
           args: release --clean --skip=publish
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APPLE_DEV_ID_APP: ${{ secrets.APPLE_DEV_ID_APP }}
-          APPLE_KEYCHAIN_PATH: ${{ env.APPLE_KEYCHAIN_PATH }}
-
-      - name: Notarize macOS archives
-        env:
-          APPLE_KEYCHAIN_PATH: ${{ env.APPLE_KEYCHAIN_PATH }}
-          APPLE_NOTARY_PROFILE: ${{ env.APPLE_NOTARY_PROFILE }}
-        run: ./scripts/notarize-darwin-archives.sh dist
 
       - name: Publish GitHub release assets
         uses: softprops/action-gh-release@v2
@@ -63,12 +44,3 @@ jobs:
             dist/checksums.txt
           generate_release_notes: true
           overwrite_files: true
-
-      - name: Cleanup temporary keychain
-        if: always()
-        env:
-          APPLE_KEYCHAIN_PATH: ${{ env.APPLE_KEYCHAIN_PATH }}
-        run: |
-          if [[ -n "${APPLE_KEYCHAIN_PATH:-}" ]] && [[ -f "${APPLE_KEYCHAIN_PATH}" ]]; then
-            security delete-keychain "${APPLE_KEYCHAIN_PATH}" || true
-          fi

@@ -24,10 +24,6 @@ builds:
     binary: a2hmarket-cli
     ldflags:
       - -s -w -X main.version={{.Version}}
-    hooks:
-      post:
-        - cmd: ./scripts/codesign-darwin-binary.sh "{{ .Path }}" "{{ .Target }}"
-          output: true
 
 archives:
   - format: tar.gz
