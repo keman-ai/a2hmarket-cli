@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/keman-ai/a2hmarket-cli/internal/a2a"
+	"github.com/keman-ai/a2hmarket-cli/internal/openclaw"
 	"github.com/keman-ai/a2hmarket-cli/internal/store"
 	"github.com/urfave/cli/v2"
 )
@@ -264,20 +265,16 @@ func inboxAckCmd(c *cli.Context) error {
 				}
 			}
 
-			// Fallback: look up peer→session binding from peer_session_route table.
-			// This covers the case where the ack comes from a system session (e.g.
-			// node-host, control-ui) that has no feishu routing info, but the peer
-			// was previously bound to a feishu session during inbox pull.
-			if (resolvedChannel == "" || resolvedTo == "") && event != nil && event.PeerID != "" {
-				route, _ := es.FindA2aReplyRoute(ctx, event.PeerID, "")
-				if route != nil && route.SessionKey != "" {
-					if hints := a2a.ParseDeliveryHintsFromSessionKey(route.SessionKey); hints != nil {
-						if resolvedChannel == "" {
-							resolvedChannel = hints.Channel
-						}
-						if resolvedTo == "" {
-							resolvedTo = hints.To
-						}
+			// Fallback: query OpenClaw sessions, pick the most recently active
+			// one that has a deliverable channel (e.g. feishu).
+			if resolvedChannel == "" || resolvedTo == "" {
+				if ds, _ := openclaw.FindMostRecentDeliverableSession(); ds != nil {
+					ch, tgt := openclaw.ParseSessionKey(ds.Key)
+					if resolvedChannel == "" {
+						resolvedChannel = ch
+					}
+					if resolvedTo == "" {
+						resolvedTo = tgt
 					}
 				}
 			}
@@ -287,10 +284,10 @@ func inboxAckCmd(c *cli.Context) error {
 				if inferKey == "" && event != nil {
 					inferKey = event.TargetSessionKey
 				}
-				// Fallback: use session key from peer route binding.
-				if inferKey == "" && event != nil && event.PeerID != "" {
-					if route, _ := es.FindA2aReplyRoute(ctx, event.PeerID, ""); route != nil {
-						inferKey = route.SessionKey
+				// Fallback: use session key from the most active deliverable session.
+				if inferKey == "" {
+					if ds, _ := openclaw.FindMostRecentDeliverableSession(); ds != nil {
+						inferKey = ds.Key
 					}
 				}
 				enqResult, enqErr := es.EnqueueMediaOutbox(ctx, store.MediaEnqueueInput{

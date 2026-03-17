@@ -31,17 +31,13 @@ type sessionsOutput struct {
 	Sessions []Session `json:"sessions"`
 }
 
-// GetMostRecentSession returns the most recently updated session.
+// ListSessions returns all OpenClaw sessions.
 // Tries the local gateway first, then falls back to the openclaw CLI.
-func GetMostRecentSession() (*Session, error) {
+func ListSessions() ([]Session, error) {
 	// 1. Try gateway
 	sessions, gwErr := GatewaySessionsList()
 	if gwErr == nil && len(sessions) > 0 {
-		s := &sessions[0]
-		s.SessionID = strings.TrimSpace(s.SessionID)
-		if s.SessionID != "" {
-			return s, nil
-		}
+		return sessions, nil
 	}
 	if gwErr != nil {
 		common.Debugf("openclaw gateway unavailable (%v), falling back to CLI", gwErr)
@@ -58,34 +54,59 @@ func GetMostRecentSession() (*Session, error) {
 	if err != nil {
 		return nil, fmt.Errorf("openclaw sessions (cli): %w", err)
 	}
-	// The CLI may output multiple JSON values or extra text.
-	// Try to extract the first valid JSON object or array from the output.
 	raw := extractJSON(out)
 	if raw == nil {
 		return nil, fmt.Errorf("openclaw sessions (cli): parse JSON: no valid JSON found in output: %s", string(out[:min(200, len(out))]))
 	}
 
-	// Try wrapper format first: {"sessions": [...]}
 	var result sessionsOutput
 	if err := json.Unmarshal(raw, &result); err == nil && len(result.Sessions) > 0 {
-		// success
-	} else {
-		// Fallback: response is directly an array of sessions
-		var list []Session
-		if err := json.Unmarshal(raw, &list); err != nil {
-			return nil, fmt.Errorf("openclaw sessions (cli): parse JSON: %w", err)
-		}
-		result.Sessions = list
+		return result.Sessions, nil
 	}
-	if len(result.Sessions) == 0 {
+	var list []Session
+	if err := json.Unmarshal(raw, &list); err != nil {
+		return nil, fmt.Errorf("openclaw sessions (cli): parse JSON: %w", err)
+	}
+	return list, nil
+}
+
+// GetMostRecentSession returns the most recently updated session.
+func GetMostRecentSession() (*Session, error) {
+	sessions, err := ListSessions()
+	if err != nil {
+		return nil, err
+	}
+	if len(sessions) == 0 {
 		return nil, fmt.Errorf("openclaw sessions: no sessions found")
 	}
-	s := &result.Sessions[0]
+	s := &sessions[0]
 	s.SessionID = strings.TrimSpace(s.SessionID)
 	if s.SessionID == "" {
 		return nil, fmt.Errorf("openclaw sessions: first session has empty sessionId")
 	}
 	return s, nil
+}
+
+// FindMostRecentDeliverableSession scans all OpenClaw sessions and returns
+// the most recently updated one whose key contains a deliverable channel
+// (e.g. feishu). Returns nil if no deliverable session is found.
+func FindMostRecentDeliverableSession() (*Session, error) {
+	sessions, err := ListSessions()
+	if err != nil {
+		return nil, err
+	}
+	var best *Session
+	for i := range sessions {
+		s := &sessions[i]
+		channel, target := ParseSessionKey(s.Key)
+		if channel == "" || target == "" {
+			continue
+		}
+		if best == nil || s.UpdatedAt > best.UpdatedAt {
+			best = s
+		}
+	}
+	return best, nil
 }
 
 // GetMostRecentSessionID is a convenience wrapper returning just the session ID.
