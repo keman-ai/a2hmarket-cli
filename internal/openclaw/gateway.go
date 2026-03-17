@@ -406,9 +406,8 @@ func min(a, b int) int {
 }
 
 // GatewayChatSend injects a message into an AI session via chat.send RPC.
-// When deliver is true, the AI's reply is automatically routed to the
-// session's originating external channel (e.g. Feishu).
-func GatewayChatSend(sessionKey, message string, deliver bool) error {
+// Does NOT deliver to external channels — use GatewayAgentSend for that.
+func GatewayChatSend(sessionKey, message string) error {
 	sess, err := openGatewaySession()
 	if err != nil {
 		return err
@@ -424,11 +423,35 @@ func GatewayChatSend(sessionKey, message string, deliver bool) error {
 		"message":        message,
 		"idempotencyKey": idempotencyKey,
 	}
-	if deliver {
-		params["deliver"] = true
-	}
 	if _, err := sendRPC(sess.conn, "chat.send", params); err != nil {
 		return fmt.Errorf("chat.send: %w", err)
+	}
+	return nil
+}
+
+// GatewayAgentSend sends a message through the "agent" RPC method with deliver=true.
+// Unlike chat.send, the agent method uses resolveAgentDeliveryPlan which has no
+// client mode restrictions, so AI replies are reliably routed to external channels.
+// This is the same path as `openclaw agent --session-key <key> --message <msg> --deliver`.
+func GatewayAgentSend(sessionKey, message string, deliver bool) error {
+	sess, err := openGatewaySession()
+	if err != nil {
+		return err
+	}
+	defer sess.close()
+
+	nonce := make([]byte, 8)
+	rand.Read(nonce)
+	idempotencyKey := fmt.Sprintf("a2h_%s_%d", gwBase64URL(nonce), time.Now().UnixMilli())
+
+	params := map[string]interface{}{
+		"sessionKey":     sessionKey,
+		"message":        message,
+		"idempotencyKey": idempotencyKey,
+		"deliver":        deliver,
+	}
+	if _, err := sendRPC(sess.conn, "agent", params); err != nil {
+		return fmt.Errorf("agent: %w", err)
 	}
 	return nil
 }

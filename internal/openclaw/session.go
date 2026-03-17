@@ -194,15 +194,24 @@ func ParseSessionKey(key string) (channel, target string) {
 }
 
 // SendToSession injects a message into an AI session, triggering the agent to reply.
-// When deliver is true, the AI's reply is automatically routed to the session's
-// originating external channel (e.g. Feishu).
+// When deliver is true, uses the "agent" RPC (not chat.send) so the AI's reply
+// is reliably routed to the session's external channel (e.g. Feishu).
 // Tries the gateway first, falls back to the CLI.
 func SendToSession(sessionKey, message string, deliver ...bool) error {
 	shouldDeliver := len(deliver) > 0 && deliver[0]
 
-	// 1. Try gateway (chat.send)
-	if err := GatewayChatSend(sessionKey, message, shouldDeliver); err == nil {
-		return nil
+	// 1. Try gateway
+	if shouldDeliver {
+		// Use "agent" RPC for delivery — it uses resolveAgentDeliveryPlan
+		// which has no client mode restrictions (unlike chat.send).
+		if err := GatewayAgentSend(sessionKey, message, true); err == nil {
+			return nil
+		}
+	} else {
+		// Use chat.send for internal-only push (no external delivery).
+		if err := GatewayChatSend(sessionKey, message); err == nil {
+			return nil
+		}
 	}
 
 	// 2. Fall back to CLI

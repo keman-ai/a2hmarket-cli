@@ -88,11 +88,36 @@ func FlushMediaOutbox(ctx context.Context, es *store.EventStore, cfg MediaDispat
 	return stats, nil
 }
 
-// deliverMedia sends a single media_outbox row directly to the external channel.
-// Uses raw send (gateway send RPC) for reliable delivery — deliver=true via AI
-// session is unreliable (depends on AI producing a reply).
+// deliverMedia sends a single media_outbox row.
+// Primary: agent RPC with deliver=true → AI processes and delivers to external channel.
+// Fallback: raw send directly to channel.
 func deliverMedia(row store.MediaOutboxRow) error {
-	// Use raw send directly to the channel.
+	sessionKey := row.SessionKey
+
+	// Try agent RPC with deliver=true on the session.
+	if sessionKey != "" {
+		ch, _ := openclaw.ParseSessionKey(sessionKey)
+		if ch != "" {
+			err := openclaw.SendToSession(sessionKey, row.MessageText, true)
+			if err == nil {
+				return nil
+			}
+			common.Warnf("media: agent+deliver failed, falling back to raw send: %v", err)
+		}
+	}
+
+	// Fallback: find a deliverable session.
+	if sessionKey == "" {
+		if ds, _ := openclaw.FindMostRecentDeliverableSession(); ds != nil {
+			err := openclaw.SendToSession(ds.Key, row.MessageText, true)
+			if err == nil {
+				return nil
+			}
+			common.Warnf("media: agent+deliver (fallback session) failed: %v", err)
+		}
+	}
+
+	// Last resort: raw send.
 	return deliverMediaRaw(row)
 }
 
