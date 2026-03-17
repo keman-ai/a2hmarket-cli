@@ -406,8 +406,9 @@ func min(a, b int) int {
 }
 
 // GatewayChatSend injects a message into an AI session via chat.send RPC.
-// Equivalent to: openclaw agent --session-id <id> --message <msg> --deliver
-func GatewayChatSend(sessionKey, message string) error {
+// When deliver is true, the AI's reply is automatically routed to the
+// session's originating external channel (e.g. Feishu).
+func GatewayChatSend(sessionKey, message string, deliver bool) error {
 	sess, err := openGatewaySession()
 	if err != nil {
 		return err
@@ -422,6 +423,9 @@ func GatewayChatSend(sessionKey, message string) error {
 		"sessionKey":     sessionKey,
 		"message":        message,
 		"idempotencyKey": idempotencyKey,
+	}
+	if deliver {
+		params["deliver"] = true
 	}
 	if _, err := sendRPC(sess.conn, "chat.send", params); err != nil {
 		return fmt.Errorf("chat.send: %w", err)

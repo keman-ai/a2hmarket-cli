@@ -193,36 +193,36 @@ func ParseSessionKey(key string) (channel, target string) {
 	return channel, target
 }
 
-// SendToSession injects a message into an AI session, triggering the agent to reply
-// and deliver its response back to the session's bound channel (e.g. Feishu).
+// SendToSession injects a message into an AI session, triggering the agent to reply.
+// When deliver is true, the AI's reply is automatically routed to the session's
+// originating external channel (e.g. Feishu).
 // Tries the gateway first, falls back to the CLI.
-func SendToSession(sessionKey, message string) error {
+func SendToSession(sessionKey, message string, deliver ...bool) error {
+	shouldDeliver := len(deliver) > 0 && deliver[0]
+
 	// 1. Try gateway (chat.send)
-	if err := GatewayChatSend(sessionKey, message); err == nil {
+	if err := GatewayChatSend(sessionKey, message, shouldDeliver); err == nil {
 		return nil
 	}
 
-	// 2. Fall back to CLI (needs session ID, not key)
-	// The CLI uses --session-id which maps to sessionId, not the session key.
-	// We derive it from the session list.
+	// 2. Fall back to CLI
 	sess, err := GetMostRecentSession()
 	if err != nil {
 		return fmt.Errorf("SendToSession fallback: cannot resolve session: %w", err)
-	}
-	if sess.Key != sessionKey {
-		// Try to find the right session — for now just use the first one.
-		// In practice the caller already resolved the right session.
 	}
 
 	bin, binErr := findOpenclawBinary()
 	if binErr != nil {
 		return fmt.Errorf("openclaw not available (gateway and cli both failed): %w", binErr)
 	}
-	cmd := exec.Command(bin, "agent",
+	args := []string{"agent",
 		"--session-id", sess.SessionID,
 		"--message", message,
-		"--deliver",
-	)
+	}
+	if shouldDeliver {
+		args = append(args, "--deliver")
+	}
+	cmd := exec.Command(bin, args...)
 	cmd.Env = enrichedEnv()
 	out, err := cmd.CombinedOutput()
 	if err != nil {

@@ -2,6 +2,7 @@ package dispatcher
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/keman-ai/a2hmarket-cli/internal/common"
@@ -22,8 +23,13 @@ type MediaStats struct {
 	Failed  int
 }
 
-// FlushMediaOutbox reads pending media_outbox rows and delivers them
-// to the external channel (e.g. Feishu) via OpenClaw.
+// FlushMediaOutbox reads pending media_outbox rows and delivers them via OpenClaw.
+//
+// Delivery strategy:
+//  1. Find the deliverable feishu session from media_outbox row's session_key
+//  2. Send message to that session via chat.send with deliver=true
+//     → AI processes the message and routes its reply to feishu
+//  3. Fallback: if no session key or chat.send fails, use raw send to channel
 func FlushMediaOutbox(ctx context.Context, es *store.EventStore, cfg MediaDispatchConfig) (MediaStats, error) {
 	if cfg.BatchSize <= 0 {
 		cfg.BatchSize = 20
@@ -83,21 +89,84 @@ func FlushMediaOutbox(ctx context.Context, es *store.EventStore, cfg MediaDispat
 	return stats, nil
 }
 
-// deliverMedia sends a single media_outbox row to the external channel.
+// deliverMedia sends a single media_outbox row.
+//
+// Primary path: chat.send with deliver=true → AI processes and delivers to feishu.
+// Fallback: raw send to channel (bypasses AI, for when session is unavailable).
 func deliverMedia(row store.MediaOutboxRow) error {
+	sessionKey := row.SessionKey
+
+	// If we have a session key with a deliverable channel, use chat.send + deliver=true.
+	// The AI will process the message and route its reply to feishu.
+	if sessionKey != "" {
+		ch, _ := openclaw.ParseSessionKey(sessionKey)
+		if ch != "" {
+			message := formatMediaSessionMessage(row)
+			err := openclaw.SendToSession(sessionKey, message, true)
+			if err == nil {
+				return nil
+			}
+			common.Warnf("media: chat.send+deliver failed, falling back to raw send: %v", err)
+		}
+	}
+
+	// Fallback: find a deliverable session from openclaw sessions list.
+	if sessionKey == "" {
+		if ds, _ := openclaw.FindMostRecentDeliverableSession(); ds != nil {
+			sessionKey = ds.Key
+			message := formatMediaSessionMessage(row)
+			err := openclaw.SendToSession(sessionKey, message, true)
+			if err == nil {
+				return nil
+			}
+			common.Warnf("media: chat.send+deliver (fallback session) failed: %v", err)
+		}
+	}
+
+	// Last resort: raw send directly to channel (bypasses AI).
+	return deliverMediaRaw(row)
+}
+
+// formatMediaSessionMessage formats the summary for AI session delivery.
+// The AI will process this and generate a proper response to the human.
+func formatMediaSessionMessage(row store.MediaOutboxRow) string {
+	parts := []string{
+		fmt.Sprintf("[A2H Market 通知 | event:%s]", row.EventID),
+		"",
+		"以下内容需要转达给人类用户，请通过当前会话的外部渠道发送给人类：",
+		"",
+	}
+
+	if row.MessageText != "" {
+		parts = append(parts, row.MessageText)
+	}
+
+	if row.MediaURL != "" {
+		parts = append(parts, "", fmt.Sprintf("附带图片: %s", row.MediaURL))
+	}
+
+	result := ""
+	for i, p := range parts {
+		if i > 0 {
+			result += "\n"
+		}
+		result += p
+	}
+	return result
+}
+
+// deliverMediaRaw sends directly to external channel, bypassing AI.
+func deliverMediaRaw(row store.MediaOutboxRow) error {
 	message := row.MessageText
 
-	// If there's a media URL, download and send with media.
 	if row.MediaURL != "" {
 		localPath, dlErr := openclaw.DownloadFile(row.MediaURL, "")
 		if dlErr != nil {
 			common.Warnf("media: download failed (%s), sending text only: %v", row.MediaURL, dlErr)
-			// Fall through to text-only send.
 		} else {
 			return openclaw.SendMediaToChannel(row.Channel, row.ToTarget, message, localPath)
 		}
 	}
 
-	// Text-only send.
 	return openclaw.SendMediaToChannel(row.Channel, row.ToTarget, message, "")
 }
