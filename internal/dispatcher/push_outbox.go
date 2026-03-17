@@ -2,6 +2,7 @@ package dispatcher
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -27,10 +28,12 @@ type PushStats struct {
 
 // FlushPushOutbox reads pending push_outbox rows and delivers them to OpenClaw.
 //
-// Each row is dispatched in its own goroutine so that slow openclaw agent
-// calls (which involve an LLM round-trip of 30-120 s) do NOT block the
-// caller's heartbeat ticker.  The caller's context is only used for the
-// initial DB read; individual delivery goroutines use independent contexts.
+// Delivery strategy (ported from JS runtime push-dispatcher.js):
+//  1. Resolve the best session for push (prefer channel sessions like feishu)
+//  2. If the message contains an image (payment_qr) AND the session has a
+//     deliverable channel → direct push to external channel (e.g. feishu)
+//  3. Always chatSend to the AI session so the agent can process the message
+//  4. On success, auto-bind the target_session on the event for future routing
 func FlushPushOutbox(ctx context.Context, es *store.EventStore, cfg PushDispatchConfig) (PushStats, error) {
 	if cfg.BatchSize <= 0 {
 		cfg.BatchSize = 20
@@ -49,13 +52,24 @@ func FlushPushOutbox(ctx context.Context, es *store.EventStore, cfg PushDispatch
 		return PushStats{}, nil
 	}
 
-	session, sessErr := openclaw.GetMostRecentSession()
+	// Resolve sessions: get all sessions to pick the best one per row.
+	allSessions, sessErr := openclaw.ListSessions()
 	if sessErr != nil {
-		common.Warnf("push: cannot resolve openclaw session, skipping %d rows (will retry next tick): %v", len(rows), sessErr)
+		common.Warnf("push: cannot list openclaw sessions, skipping %d rows (will retry next tick): %v", len(rows), sessErr)
+		return PushStats{Skipped: len(rows), SessionUnavailable: true}, nil
+	}
+	if len(allSessions) == 0 {
+		common.Warnf("push: no openclaw sessions found, skipping %d rows", len(rows))
 		return PushStats{Skipped: len(rows), SessionUnavailable: true}, nil
 	}
 
-	channel, target := openclaw.ParseSessionKey(session.Key)
+	// Pick the best session for push: prefer channel session (feishu), fallback to latest.
+	pushSession := openclaw.ResolvePushSession(allSessions)
+	if pushSession == nil {
+		common.Warnf("push: no valid session resolved, skipping %d rows", len(rows))
+		return PushStats{Skipped: len(rows), SessionUnavailable: true}, nil
+	}
+	channel, target := openclaw.ParseSessionKey(pushSession.Key)
 
 	var stats PushStats
 	for _, row := range rows {
@@ -63,10 +77,6 @@ func FlushPushOutbox(ctx context.Context, es *store.EventStore, cfg PushDispatch
 			break
 		}
 
-		// Mark in-flight immediately so the next flush tick doesn't pick it
-		// up again while the goroutine is still waiting for OpenClaw.
-		// We use status=SENT with a generous ack deadline; the goroutine will
-		// update it to SENT (on success) or RETRY (on failure) when done.
 		inflight := time.Now().UnixMilli() + int64(cfg.MaxDelayMs)
 		dbCtx, dbCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		if err := es.MarkPushSent(dbCtx, row.OutboxID, row.EventID, inflight); err != nil {
@@ -77,23 +87,47 @@ func FlushPushOutbox(ctx context.Context, es *store.EventStore, cfg PushDispatch
 		dbCancel()
 
 		rowCopy := row
-		sessCopy := session
-		dispatchAsync(es, rowCopy, sessCopy, channel, target, cfg)
+		sessCopy := pushSession
+		dispatchDualChannel(es, rowCopy, sessCopy, channel, target, cfg)
 		stats.Sent++
 	}
 
 	return stats, nil
 }
 
-// dispatchAsync runs in a goroutine per message.  It calls openclaw (slow),
-// then updates the DB with the outcome.
-func dispatchAsync(es *store.EventStore, row store.PushOutboxRow, session *openclaw.Session, channel, target string, cfg PushDispatchConfig) {
-	sendErr := dispatchRow(row, session, channel, target)
+// dispatchDualChannel implements the JS runtime's dual-channel push strategy:
+// 1. If image + deliverable channel → direct push to external channel (feishu)
+// 2. Always chatSend to AI session
+// 3. On success, auto-bind target_session on the event
+func dispatchDualChannel(es *store.EventStore, row store.PushOutboxRow, session *openclaw.Session, channel, target string, cfg PushDispatchConfig) {
+	att := openclaw.ExtractAttachment(row)
+
+	// Step 1: Direct push to external channel if image is present
+	// (ported from JS push-dispatcher.js:162-171)
+	if att != nil && att.IsImage && channel != "" && target != "" {
+		directErr := directPushToChannel(row, att, channel, target)
+		if directErr == nil {
+			common.Infof("push: direct push ok (image auto) event_id=%s channel=%s", row.EventID, channel)
+		} else {
+			common.Warnf("push: direct push failed event_id=%s: %v", row.EventID, directErr)
+		}
+	}
+
+	// Step 2: Always chatSend to AI session
+	text := openclaw.FormatPushText(row)
+	sendErr := openclaw.SendToSession(session.Key, text)
 
 	dbCtx, dbCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer dbCancel()
 
 	if sendErr == nil {
+		// Step 3: Auto-bind target_session on the event (ported from JS push-dispatcher.js:178-188)
+		if channel != "" && target != "" {
+			if _, err := es.UpdateEventTargetSession(dbCtx, row.EventID, session.SessionID, session.Key); err != nil {
+				common.Debugf("push: bind target_session failed event_id=%s: %v", row.EventID, err)
+			}
+		}
+
 		ackDeadline := time.Now().UnixMilli() + 15_000
 		if err := es.MarkPushSent(dbCtx, row.OutboxID, row.EventID, ackDeadline); err != nil {
 			common.Warnf("push: mark sent failed event_id=%s: %v", row.EventID, err)
@@ -113,40 +147,15 @@ func dispatchAsync(es *store.EventStore, row store.PushOutboxRow, session *openc
 		row.EventID, nextAttempt, int(delayMs), sendErr)
 }
 
-// dispatchRow decides the best delivery method for a single push row.
-func dispatchRow(row store.PushOutboxRow, session *openclaw.Session, channel, target string) error {
-	att := openclaw.ExtractAttachment(row)
-
-	if att == nil {
-		text := openclaw.FormatPushText(row)
-		return openclaw.SendToSession(session.Key, text)
-	}
-
-	if channel != "" && target != "" {
-		return dispatchWithMedia(row, att, channel, target, session)
-	}
-
-	text := openclaw.FormatExternalURLText(row, att)
-	return openclaw.SendToSession(session.Key, text)
-}
-
-// dispatchWithMedia downloads the attachment and sends it via openclaw message send.
-func dispatchWithMedia(row store.PushOutboxRow, att *openclaw.AttachmentInfo, channel, target string, session *openclaw.Session) error {
+// directPushToChannel downloads the image and sends it directly to the
+// external channel (e.g. feishu), bypassing the AI session.
+func directPushToChannel(row store.PushOutboxRow, att *openclaw.AttachmentInfo, channel, target string) error {
 	localPath, dlErr := openclaw.DownloadFile(att.URL, att.Name)
 	if dlErr != nil {
-		common.Warnf("push: download failed (%s), falling back to URL text: %v", att.Name, dlErr)
-		text := openclaw.FormatExternalURLText(row, att)
-		return openclaw.SendToSession(session.Key, text)
+		return fmt.Errorf("download %s: %w", att.Name, dlErr)
 	}
-
 	common.Debugf("push: downloaded %s → %s", att.Name, localPath)
 
 	msgText := openclaw.FormatPushTextForMedia(row)
-	sendErr := openclaw.SendMediaToChannel(channel, target, msgText, localPath)
-	if sendErr != nil {
-		common.Warnf("push: media send failed, falling back to agent: %v", sendErr)
-		text := openclaw.FormatExternalURLText(row, att)
-		return openclaw.SendToSession(session.Key, text)
-	}
-	return nil
+	return openclaw.SendMediaToChannel(channel, target, msgText, localPath)
 }

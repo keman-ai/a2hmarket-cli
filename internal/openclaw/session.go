@@ -109,6 +109,66 @@ func FindMostRecentDeliverableSession() (*Session, error) {
 	return best, nil
 }
 
+// ResolvePushSession picks the best session for push delivery from a list.
+// Priority (mirrors JS openclaw-routing.js):
+//  1. Channel session with feishu preferred (most recently updated)
+//  2. Any non-main session (most recently updated)
+//  3. First session with a valid sessionId
+func ResolvePushSession(sessions []Session) *Session {
+	if len(sessions) == 0 {
+		return nil
+	}
+
+	// 1. Pick best channel session (feishu preferred)
+	var bestChannel *Session
+	for i := range sessions {
+		s := &sessions[i]
+		ch, tgt := ParseSessionKey(s.Key)
+		if ch == "" || tgt == "" {
+			continue
+		}
+		if bestChannel == nil {
+			bestChannel = s
+			continue
+		}
+		// Prefer feishu over other channels
+		bestIsFeishu := strings.Contains(strings.ToLower(bestChannel.Key), "feishu")
+		curIsFeishu := strings.Contains(strings.ToLower(s.Key), "feishu")
+		if curIsFeishu && !bestIsFeishu {
+			bestChannel = s
+		} else if curIsFeishu == bestIsFeishu && s.UpdatedAt > bestChannel.UpdatedAt {
+			bestChannel = s
+		}
+	}
+	if bestChannel != nil && strings.TrimSpace(bestChannel.SessionID) != "" {
+		return bestChannel
+	}
+
+	// 2. Any non-main session
+	var bestNonMain *Session
+	for i := range sessions {
+		s := &sessions[i]
+		if s.Key == "agent:main:main" || strings.TrimSpace(s.SessionID) == "" {
+			continue
+		}
+		if bestNonMain == nil || s.UpdatedAt > bestNonMain.UpdatedAt {
+			bestNonMain = s
+		}
+	}
+	if bestNonMain != nil {
+		return bestNonMain
+	}
+
+	// 3. Fallback: first session with valid sessionId
+	for i := range sessions {
+		s := &sessions[i]
+		if strings.TrimSpace(s.SessionID) != "" {
+			return s
+		}
+	}
+	return nil
+}
+
 // GetMostRecentSessionID is a convenience wrapper returning just the session ID.
 func GetMostRecentSessionID() (string, error) {
 	s, err := GetMostRecentSession()
