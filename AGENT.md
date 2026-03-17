@@ -12,15 +12,49 @@
 
 **教训**：添加新的 outbox 表后，必须在 listener daemon 的 flush ticker 里加对应的 flush 循环，否则消息入队了但永远不会被消费。`media_outbox` 曾因缺少 flush 循环导致飞书通知全部积压。
 
+### OpenClaw Gateway RPC 方法选择
+
+与 OpenClaw gateway 交互有三种 RPC 方法，用途完全不同：
+
+| RPC 方法 | 用途 | 是否经过 AI | 能否投递飞书 |
+|----------|------|------------|------------|
+| `chat.send` | 向 AI session 注入消息 | 是，AI 处理 | **不能**（client mode 限制） |
+| `agent` | 向 AI session 注入消息 + deliver | 是，AI 处理 | **能**（需传 channel + replyTo） |
+| `send` | 直接发消息到外部渠道 | 否，绕过 AI | 能（raw send） |
+
+**核心教训**：
+
+1. **要让 AI 处理后投递飞书，必须用 `agent` RPC + `deliver=true`**，不能用 `chat.send`。
+   - `chat.send` 的 `deliver=true` 有 client mode 限制：`resolveChatSendOriginatingRoute` 检查 client mode，`"backend"` mode 被拒绝继承 session 的外部路由。
+   - `agent` RPC 用 `resolveAgentDeliveryPlan`，没有 client mode 限制。
+   - 这和 `openclaw agent --session-id <id> --message <msg> --deliver` CLI 是同一条路径。
+
+2. **`agent` RPC 投递飞书时必须显式传 `channel` 和 `replyTo`**。
+   - 不传会报错：`Delivering to Feishu requires target <chatId|user:openId|chat:chatId>`
+   - 从 session key 解析：`agent:main:feishu:direct:ou_xxx` → `channel="feishu"`, `replyTo="ou_xxx"`
+
+3. **`send` RPC 是 raw send，直接到飞书，不经过 AI**。
+   - 可靠但消息没有 AI 处理和格式化
+   - 作为 `agent` RPC 失败时的兜底
+
 ### OpenClaw 交互双通道
 
-所有 OpenClaw 操作（sessions.list / chat.send / message send）都走双通道：
+所有 OpenClaw 操作都走双通道：
 1. **优先**：WebSocket gateway（`ws://127.0.0.1:{port}`），快
 2. **回退**：CLI 子进程（`exec openclaw ...`），慢但稳
 
 **教训**：
 - gateway 认证 token 优先从 `~/.openclaw/openclaw.json` 读取（与 gateway 同一份配置），不要依赖 `device-auth.json`，两者容易不一致。
 - CLI 回退时 `openclaw sessions --json` 的 stdout 可能混入 `[plugins]` 日志行，JSON 解析必须容忍非 JSON 前缀/后缀。用 `json.Decoder` 提取第一个完整 JSON 值。
+
+### Session 路由策略
+
+`ResolvePushSession` 从 OpenClaw sessions 列表中选最佳 session，优先级：
+1. feishu channel session（`updatedAt` 最新的）
+2. 任何非 main session
+3. 任何有 sessionId 的 session
+
+**教训**：push_outbox 之前用 `GetMostRecentSession` 取第一个 session（可能是 `agent:main:main` 系统 session），消息到了 AI 但 AI 回复留在 webchat。必须优先选飞书 session。
 
 ### 飞书投递目标的推导链
 
@@ -63,7 +97,35 @@
 - [ ] dispatcher 层：Flush 函数
 - [ ] listener.go：flush ticker 里调用 Flush
 
-### 5. `openclaw sessions --json` 输出格式不稳定
+### 5. push_outbox SENT 行永久积压
+
+**问题**：消息成功 `push: delivered` 后标记为 `SENT`，但没有人转为 `ACKED`。`pending_push_count` 持续增长。
+
+**根因**：Go 版 `FlushPushOutbox` 只处理 `PENDING`/`RETRY` 行，不清理 `SENT` 行。JS 版有 `push_once` 逻辑在每次 flush 时清理 SENT → ACKED。
+
+**规则**：flush 循环必须先扫描 `SENT` 行并标记 `ACKED`（push_once 模式），再处理 `PENDING`/`RETRY`。
+
+### 6. chat.send deliver=true 不投递飞书
+
+**问题**：`chat.send` 带 `deliver=true` 调用成功（无报错），但 AI 回复不路由到飞书，只留在 webchat。
+
+**根因**：OpenClaw 的 `resolveChatSendOriginatingRoute` 检查 client mode。我们的 `"backend"` mode 不满足条件（只有 `"cli"` mode 或无 metadata 的客户端才能继承 session 外部路由）。
+
+**解决**：改用 `agent` RPC 方法（`resolveAgentDeliveryPlan`，无 client mode 限制），并显式传 `channel` 和 `replyTo` 参数。
+
+### 7. agent RPC 缺少 channel/replyTo 导致飞书投递失败
+
+**问题**：`agent` RPC 带 `deliver=true` 但不传 `channel` 和 `replyTo`，报错 `Delivering to Feishu requires target`。
+
+**根因**：`resolveAgentDeliveryPlan` 能从 session entry 的 `lastChannel`/`lastTo` 推断投递目标，但如果 session entry 没有这些字段（首次投递或字段未持久化），就需要显式传。
+
+**规则**：调用 `agent` RPC 时，始终从 session key 解析 channel 和 target 并显式传入：
+```go
+channel, target := ParseSessionKey(sessionKey)
+GatewayAgentSend(sessionKey, message, true, channel, target)
+```
+
+### 8. `openclaw sessions --json` 输出格式不稳定（原 #5）
 
 **问题**：CLI 输出里 JSON 后面跟了 `[plugins] ...` 行，`json.Unmarshal` 报 `invalid character '[' after top-level value`。而且不同版本可能返回 `{"sessions":[...]}` 或直接 `[...]`。
 
