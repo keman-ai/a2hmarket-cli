@@ -41,6 +41,7 @@ func main() {
 			statusCommand(),
 			apiCallCommand(),
 			updateCommand(),
+			updateSkillCommand(),
 			doctorCommand(),
 		},
 	}
