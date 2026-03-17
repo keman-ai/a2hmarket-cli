@@ -204,7 +204,9 @@ func SendToSession(sessionKey, message string, deliver ...bool) error {
 	if shouldDeliver {
 		// Use "agent" RPC for delivery — it uses resolveAgentDeliveryPlan
 		// which has no client mode restrictions (unlike chat.send).
-		if err := GatewayAgentSend(sessionKey, message, true); err == nil {
+		// Must pass channel and target explicitly for feishu delivery.
+		channel, target := ParseSessionKey(sessionKey)
+		if err := GatewayAgentSend(sessionKey, message, true, channel, target); err == nil {
 			return nil
 		}
 	} else {

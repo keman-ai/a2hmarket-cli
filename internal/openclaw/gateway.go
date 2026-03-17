@@ -429,11 +429,12 @@ func GatewayChatSend(sessionKey, message string) error {
 	return nil
 }
 
-// GatewayAgentSend sends a message through the "agent" RPC method with deliver=true.
+// GatewayAgentSend sends a message through the "agent" RPC method.
 // Unlike chat.send, the agent method uses resolveAgentDeliveryPlan which has no
 // client mode restrictions, so AI replies are reliably routed to external channels.
-// This is the same path as `openclaw agent --session-key <key> --message <msg> --deliver`.
-func GatewayAgentSend(sessionKey, message string, deliver bool) error {
+// This is the same path as `openclaw agent --session-id <id> --message <msg> --deliver`.
+// When deliver is true, channel and replyTo must be provided for feishu delivery.
+func GatewayAgentSend(sessionKey, message string, deliver bool, channel, replyTo string) error {
 	sess, err := openGatewaySession()
 	if err != nil {
 		return err
@@ -449,6 +450,12 @@ func GatewayAgentSend(sessionKey, message string, deliver bool) error {
 		"message":        message,
 		"idempotencyKey": idempotencyKey,
 		"deliver":        deliver,
+	}
+	if channel != "" {
+		params["channel"] = channel
+	}
+	if replyTo != "" {
+		params["replyTo"] = replyTo
 	}
 	if _, err := sendRPC(sess.conn, "agent", params); err != nil {
 		return fmt.Errorf("agent: %w", err)
