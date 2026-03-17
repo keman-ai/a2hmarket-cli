@@ -4,6 +4,7 @@ package main
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
@@ -159,7 +160,7 @@ func downloadAndReplace(binPath, tag string) error {
 	arch := runtime.GOARCH
 
 	ext := "tar.gz"
-	if osName == "windows" {
+	if osName == "windows" || osName == "darwin" {
 		ext = "zip"
 	}
 	filename := fmt.Sprintf("a2hmarket-cli_%s_%s.%s", osName, arch, ext)
@@ -219,8 +220,12 @@ func downloadAndReplace(binPath, tag string) error {
 		if err := extractTarGz(archivePath, tmpDir); err != nil {
 			return err
 		}
+	} else if ext == "zip" {
+		if err := extractZip(archivePath, tmpDir); err != nil {
+			return err
+		}
 	} else {
-		return fmt.Errorf("zip 格式暂不支持，请手动运行 install.sh 更新")
+		return fmt.Errorf("不支持的格式: %s", ext)
 	}
 
 	newBinPath, err := findBinaryInDir(tmpDir, "a2hmarket-cli")
@@ -282,6 +287,40 @@ func extractTarGz(archivePath, destDir string) error {
 			return err
 		}
 		out.Close()
+	}
+	return nil
+}
+
+func extractZip(archivePath, destDir string) error {
+	r, err := zip.OpenReader(archivePath)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+
+	for _, f := range r.File {
+		path := filepath.Join(destDir, f.Name)
+		if f.FileInfo().IsDir() {
+			os.MkdirAll(path, 0755)
+			continue
+		}
+		os.MkdirAll(filepath.Dir(path), 0755)
+		rc, err := f.Open()
+		if err != nil {
+			return err
+		}
+		out, err := os.Create(path)
+		if err != nil {
+			rc.Close()
+			return err
+		}
+		if _, err := io.Copy(out, rc); err != nil {
+			out.Close()
+			rc.Close()
+			return err
+		}
+		out.Close()
+		rc.Close()
 	}
 	return nil
 }
