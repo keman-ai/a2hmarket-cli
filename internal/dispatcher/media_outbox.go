@@ -2,7 +2,6 @@ package dispatcher
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/keman-ai/a2hmarket-cli/internal/common"
@@ -89,73 +88,15 @@ func FlushMediaOutbox(ctx context.Context, es *store.EventStore, cfg MediaDispat
 	return stats, nil
 }
 
-// deliverMedia sends a single media_outbox row.
-//
-// Primary path: chat.send with deliver=true → AI processes and delivers to feishu.
-// Fallback: raw send to channel (bypasses AI, for when session is unavailable).
+// deliverMedia sends a single media_outbox row directly to the external channel.
+// Uses raw send (gateway send RPC) for reliable delivery — deliver=true via AI
+// session is unreliable (depends on AI producing a reply).
 func deliverMedia(row store.MediaOutboxRow) error {
-	sessionKey := row.SessionKey
-
-	// If we have a session key with a deliverable channel, use chat.send + deliver=true.
-	// The AI will process the message and route its reply to feishu.
-	if sessionKey != "" {
-		ch, _ := openclaw.ParseSessionKey(sessionKey)
-		if ch != "" {
-			message := formatMediaSessionMessage(row)
-			err := openclaw.SendToSession(sessionKey, message, true)
-			if err == nil {
-				return nil
-			}
-			common.Warnf("media: chat.send+deliver failed, falling back to raw send: %v", err)
-		}
-	}
-
-	// Fallback: find a deliverable session from openclaw sessions list.
-	if sessionKey == "" {
-		if ds, _ := openclaw.FindMostRecentDeliverableSession(); ds != nil {
-			sessionKey = ds.Key
-			message := formatMediaSessionMessage(row)
-			err := openclaw.SendToSession(sessionKey, message, true)
-			if err == nil {
-				return nil
-			}
-			common.Warnf("media: chat.send+deliver (fallback session) failed: %v", err)
-		}
-	}
-
-	// Last resort: raw send directly to channel (bypasses AI).
+	// Use raw send directly to the channel.
 	return deliverMediaRaw(row)
 }
 
-// formatMediaSessionMessage formats the summary for AI session delivery.
-// The AI will process this and generate a proper response to the human.
-func formatMediaSessionMessage(row store.MediaOutboxRow) string {
-	parts := []string{
-		fmt.Sprintf("[A2H Market 通知 | event:%s]", row.EventID),
-		"",
-		"以下内容需要转达给人类用户，请通过当前会话的外部渠道发送给人类：",
-		"",
-	}
-
-	if row.MessageText != "" {
-		parts = append(parts, row.MessageText)
-	}
-
-	if row.MediaURL != "" {
-		parts = append(parts, "", fmt.Sprintf("附带图片: %s", row.MediaURL))
-	}
-
-	result := ""
-	for i, p := range parts {
-		if i > 0 {
-			result += "\n"
-		}
-		result += p
-	}
-	return result
-}
-
-// deliverMediaRaw sends directly to external channel, bypassing AI.
+// deliverMediaRaw sends directly to external channel via raw send RPC.
 func deliverMediaRaw(row store.MediaOutboxRow) error {
 	message := row.MessageText
 

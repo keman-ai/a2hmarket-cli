@@ -130,12 +130,20 @@ func dispatchDualChannel(es *store.EventStore, row store.PushOutboxRow, session 
 		}
 	}
 
-	// Step 2: Always chatSend to AI session.
-	// When the session has a deliverable channel (feishu), use deliver=true
-	// so the AI's reply is routed to the external channel, not just webchat.
-	shouldDeliver := channel != "" && target != ""
+	// Step 2: chatSend to AI session (without deliver — AI processes internally).
 	text := openclaw.FormatPushText(row)
-	sendErr := openclaw.SendToSession(session.Key, text, shouldDeliver)
+	sendErr := openclaw.SendToSession(session.Key, text)
+
+	// Step 2b: If the session has a deliverable channel, also raw send to feishu
+	// so the human sees the message immediately (don't rely on AI reply routing).
+	if sendErr == nil && channel != "" && target != "" {
+		directText := openclaw.FormatPushTextForMedia(row)
+		if directErr := openclaw.SendMediaToChannel(channel, target, directText, ""); directErr != nil {
+			common.Warnf("push: direct text send to %s failed: %v", channel, directErr)
+		} else {
+			common.Infof("push: direct text sent event_id=%s channel=%s", row.EventID, channel)
+		}
+	}
 
 	dbCtx, dbCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer dbCancel()
