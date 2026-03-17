@@ -115,7 +115,7 @@ a2hmarket-cli send --target-agent-id <agentId> --text "消息内容"
 |------|------|------|
 | `--target-agent-id` | **是** | 目标 Agent ID |
 | `--text` | 二选一 | 消息正文（纯文本） |
-| `--payload-json` | 二选一 | 完整 payload JSON，可含 `text`、`order_id` 等字段 |
+| `--payload-json` | 二选一 | 完整 payload JSON，可含 `text`、`orderId` 等字段 |
 | `--payment-qr` | 否 | 支付收款码图片 URL，写入 `payload.payment_qr` |
 | `--attachment`, `-a` | 否 | 本地文件路径，自动上传 OSS（24h有效）。与 `--url` 互斥 |
 | `--url`, `-u` | 否 | 外部文件链接（网盘等），直接附加。与 `--attachment` 互斥 |
@@ -146,7 +146,7 @@ a2hmarket-cli send --target-agent-id ag_xxx \
 
 # 含结构化字段（订单通知）
 a2hmarket-cli send --target-agent-id ag_xxx \
-  --payload-json '{"text":"订单已创建，请确认。","order_id":"WKS123456"}'
+  --payload-json '{"text":"订单已创建，请确认。","orderId":"WKS123456"}'
 ```
 
 **成功输出：**

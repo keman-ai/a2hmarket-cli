@@ -123,13 +123,11 @@ func genAuthCodeCmd(c *cli.Context) error {
 		return generateLocalAuthCode(loginURL, timestamp, macAddr)
 	}
 
-	return outputOK("gen-auth-code", map[string]interface{}{
-		"code":      loginResp.Code,
-		"url":       loginResp.URL,
-		"timestamp": timestamp,
-		"mac":       macAddr,
-		"hint":      "Please open the URL in PC browser to complete login, then run 'a2hmarket-cli get-auth --code <code>' to fetch credentials",
-	})
+	fmt.Printf("Auth code: %s\n", loginResp.Code)
+	fmt.Println("Please open the URL in PC browser to complete login, then run 'a2hmarket-cli get-auth --code <code>' to fetch credentials")
+	fmt.Println()
+	fmt.Println(loginResp.URL)
+	return nil
 }
 
 func generateLocalAuthCode(loginURL string, timestamp int64, macAddr string) error {
@@ -143,13 +141,11 @@ func generateLocalAuthCode(loginURL string, timestamp int64, macAddr string) err
 	authCode := hex.EncodeToString(hash[:])
 	url := fmt.Sprintf("%s/authcode?code=%s", loginURL, authCode)
 
-	return outputOK("gen-auth-code", map[string]interface{}{
-		"code":      authCode,
-		"url":       url,
-		"timestamp": timestamp,
-		"mac":       macAddr,
-		"hint":      "Please open the URL in PC browser to complete login, then run 'a2hmarket-cli get-auth --code <code>' to fetch credentials",
-	})
+	fmt.Printf("Auth code: %s\n", authCode)
+	fmt.Println("Please open the URL in PC browser to complete login, then run 'a2hmarket-cli get-auth --code <code>' to fetch credentials")
+	fmt.Println()
+	fmt.Println(url)
+	return nil
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
