@@ -6,10 +6,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -410,43 +412,94 @@ func listenerRunCmd(c *cli.Context) error {
 	}
 }
 
-// checkAndNotifyUpdate checks for a new CLI version and notifies via OpenClaw session.
+// checkAndNotifyUpdate checks for new CLI and skill versions, notifies via feishu.
 func checkAndNotifyUpdate() {
-	latestTag, err := fetchLatestTag()
+	var notifications []string
+
+	// Check CLI version.
+	cliLatest, err := fetchLatestTag()
 	if err != nil {
-		common.Debugf("update check: failed to fetch latest tag: %v", err)
+		common.Debugf("update check: failed to fetch CLI latest tag: %v", err)
+	} else {
+		current := normalizeVersion(version)
+		latest := normalizeVersion(cliLatest)
+		if isNewer(latest, current) {
+			common.Infof("update check: CLI new version %s (current %s)", cliLatest, version)
+			notifications = append(notifications, fmt.Sprintf(
+				"🔄 a2hmarket-cli 有新版本\n"+
+					"· 当前：%s → 最新：%s\n"+
+					"· 更新命令：a2hmarket-cli update", version, cliLatest))
+		} else {
+			common.Debugf("update check: CLI %s is up to date", version)
+		}
+	}
+
+	// Check skill version.
+	skillDir := filepath.Join(findOpenclawStateDir(), "workspace", "skills", skillName)
+	localSkillVer := readSkillVersion(skillDir)
+	remoteSkillVer := fetchLatestSkillTag()
+	if remoteSkillVer != "" && localSkillVer != "" {
+		local := normalizeVersion(localSkillVer)
+		remote := normalizeVersion(remoteSkillVer)
+		if isNewer(remote, local) {
+			common.Infof("update check: skill new version %s (current %s)", remoteSkillVer, localSkillVer)
+			notifications = append(notifications, fmt.Sprintf(
+				"📦 a2hmarket skill 有新版本\n"+
+					"· 当前：%s → 最新：%s\n"+
+					"· 更新命令：a2hmarket-cli update-skill", localSkillVer, remoteSkillVer))
+		} else {
+			common.Debugf("update check: skill %s is up to date", localSkillVer)
+		}
+	} else if remoteSkillVer != "" && localSkillVer == "" {
+		common.Debugf("update check: skill not installed locally, skipping")
+	}
+
+	if len(notifications) == 0 {
 		return
 	}
 
-	current := normalizeVersion(version)
-	latest := normalizeVersion(latestTag)
-
-	if !isNewer(latest, current) {
-		common.Debugf("update check: current %s is up to date (latest %s)", version, latestTag)
-		return
-	}
-
-	common.Infof("update check: new version available %s (current %s)", latestTag, version)
-
-	// Notify via OpenClaw session.
+	// Send combined notification.
 	ds, err := openclaw.FindMostRecentDeliverableSession()
 	if err != nil || ds == nil {
 		common.Debugf("update check: no deliverable session, skipping notification")
 		return
 	}
 
-	msg := fmt.Sprintf("🔄 a2hmarket-cli 有新版本\n\n"+
-		"· 当前版本：%s\n"+
-		"· 最新版本：%s\n\n"+
-		"请运行以下命令更新：\n"+
-		"a2hmarket-cli update", version, latestTag)
-
+	msg := strings.Join(notifications, "\n\n")
 	ch, tgt := openclaw.ParseSessionKey(ds.Key)
 	if err := openclaw.SendMediaToChannel(ch, tgt, msg, ""); err != nil {
 		common.Warnf("update check: failed to notify: %v", err)
 	} else {
-		common.Infof("update check: notified user about %s via %s", latestTag, ch)
+		common.Infof("update check: notified user via %s", ch)
 	}
+}
+
+// fetchLatestSkillTag fetches the latest release tag for the a2hmarket skill repo.
+func fetchLatestSkillTag() string {
+	urls := []string{
+		fmt.Sprintf("%s/api/repos/keman-ai/a2hmarket/releases/latest", a2hProxy),
+		"https://api.github.com/repos/keman-ai/a2hmarket/releases/latest",
+	}
+	client := &http.Client{Timeout: 15 * time.Second}
+	for _, u := range urls {
+		resp, err := client.Get(u)
+		if err != nil || resp.StatusCode != http.StatusOK {
+			if resp != nil {
+				resp.Body.Close()
+			}
+			continue
+		}
+		var rel latestRelease
+		if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
+			resp.Body.Close()
+			continue
+		}
+		resp.Body.Close()
+		if rel.TagName != "" {
+			return rel.TagName
+		}
+	}
+	return ""
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
