@@ -425,10 +425,13 @@ func checkAndNotifyUpdate() {
 		latest := normalizeVersion(cliLatest)
 		if isNewer(latest, current) {
 			common.Infof("update check: CLI new version %s (current %s)", cliLatest, version)
-			notifications = append(notifications, fmt.Sprintf(
-				"🔄 a2hmarket-cli 有新版本\n"+
-					"· 当前：%s → 最新：%s\n"+
-					"· 更新命令：a2hmarket-cli update", version, cliLatest))
+			// Only notify user for major/minor bumps (e.g. 1.1.x → 1.2.x), not patch-only.
+			if isMajorMinorNewer(latest, current) {
+				notifications = append(notifications, fmt.Sprintf(
+					"🔄 a2hmarket-cli 有新版本\n"+
+						"· 当前：%s → 最新：%s\n"+
+						"· 更新命令：a2hmarket-cli update", version, cliLatest))
+			}
 		} else {
 			common.Debugf("update check: CLI %s is up to date", version)
 		}
@@ -443,10 +446,12 @@ func checkAndNotifyUpdate() {
 		remote := normalizeVersion(remoteSkillVer)
 		if isNewer(remote, local) {
 			common.Infof("update check: skill new version %s (current %s)", remoteSkillVer, localSkillVer)
-			notifications = append(notifications, fmt.Sprintf(
-				"📦 a2hmarket skill 有新版本\n"+
-					"· 当前：%s → 最新：%s\n"+
-					"· 更新命令：a2hmarket-cli update-skill", localSkillVer, remoteSkillVer))
+			if isMajorMinorNewer(remote, local) {
+				notifications = append(notifications, fmt.Sprintf(
+					"📦 a2hmarket skill 有新版本\n"+
+						"· 当前：%s → 最新：%s\n"+
+						"· 更新命令：a2hmarket-cli update-skill", localSkillVer, remoteSkillVer))
+			}
 		} else {
 			common.Debugf("update check: skill %s is up to date", localSkillVer)
 		}

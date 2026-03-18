@@ -145,6 +145,29 @@ func isNewer(a, b string) bool {
 	return false
 }
 
+// isMajorMinorNewer returns true when a's major or minor version is greater than b's.
+// Patch-only bumps (e.g. 1.1.33 → 1.1.34) return false.
+func isMajorMinorNewer(a, b string) bool {
+	pa := parseVersion(a)
+	pb := parseVersion(b)
+	for i := 0; i < 2; i++ {
+		va, vb := 0, 0
+		if i < len(pa) {
+			va = pa[i]
+		}
+		if i < len(pb) {
+			vb = pb[i]
+		}
+		if va > vb {
+			return true
+		}
+		if va < vb {
+			return false
+		}
+	}
+	return false
+}
+
 func parseVersion(s string) []int {
 	var parts []int
 	for _, p := range strings.Split(s, ".") {
