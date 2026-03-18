@@ -19,6 +19,7 @@ import (
 	"github.com/keman-ai/a2hmarket-cli/internal/dispatcher"
 	"github.com/keman-ai/a2hmarket-cli/internal/lease"
 	mqttpkg "github.com/keman-ai/a2hmarket-cli/internal/mqtt"
+	"github.com/keman-ai/a2hmarket-cli/internal/openclaw"
 	"github.com/keman-ai/a2hmarket-cli/internal/protocol"
 	"github.com/keman-ai/a2hmarket-cli/internal/store"
 	"github.com/urfave/cli/v2"
@@ -254,9 +255,16 @@ func listenerRunCmd(c *cli.Context) error {
 	followerPollTicker := time.NewTicker(20 * time.Second)
 	defer followerPollTicker.Stop()
 
-	// Flush ticker (5s) — flushes a2a_outbox when leader.
-	flushTicker := time.NewTicker(5 * time.Second)
+	// Flush ticker — flushes outbox tables when leader.
+	flushInterval := creds.Listener.ParseFlushInterval()
+	flushTicker := time.NewTicker(flushInterval)
 	defer flushTicker.Stop()
+
+	// Update check ticker — periodically check for new CLI version.
+	updateCheckInterval := creds.Listener.ParseUpdateCheckInterval()
+	updateCheckTicker := time.NewTicker(updateCheckInterval)
+	defer updateCheckTicker.Stop()
+	common.Infof("update check interval=%s  flush interval=%s", updateCheckInterval, flushInterval)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -395,7 +403,49 @@ func listenerRunCmd(c *cli.Context) error {
 					common.Infof("media flush: sent=%d retried=%d failed=%d", mediaStats.Sent, mediaStats.Retried, mediaStats.Failed)
 				}
 			}
+
+		case <-updateCheckTicker.C:
+			checkAndNotifyUpdate()
 		}
+	}
+}
+
+// checkAndNotifyUpdate checks for a new CLI version and notifies via OpenClaw session.
+func checkAndNotifyUpdate() {
+	latestTag, err := fetchLatestTag()
+	if err != nil {
+		common.Debugf("update check: failed to fetch latest tag: %v", err)
+		return
+	}
+
+	current := normalizeVersion(version)
+	latest := normalizeVersion(latestTag)
+
+	if !isNewer(latest, current) {
+		common.Debugf("update check: current %s is up to date (latest %s)", version, latestTag)
+		return
+	}
+
+	common.Infof("update check: new version available %s (current %s)", latestTag, version)
+
+	// Notify via OpenClaw session.
+	ds, err := openclaw.FindMostRecentDeliverableSession()
+	if err != nil || ds == nil {
+		common.Debugf("update check: no deliverable session, skipping notification")
+		return
+	}
+
+	msg := fmt.Sprintf("🔄 a2hmarket-cli 有新版本\n\n"+
+		"· 当前版本：%s\n"+
+		"· 最新版本：%s\n\n"+
+		"请运行以下命令更新：\n"+
+		"a2hmarket-cli update", version, latestTag)
+
+	ch, tgt := openclaw.ParseSessionKey(ds.Key)
+	if err := openclaw.SendMediaToChannel(ch, tgt, msg, ""); err != nil {
+		common.Warnf("update check: failed to notify: %v", err)
+	} else {
+		common.Infof("update check: notified user about %s via %s", latestTag, ch)
 	}
 }
 

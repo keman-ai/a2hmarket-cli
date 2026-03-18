@@ -8,6 +8,36 @@ import (
 	"github.com/keman-ai/a2hmarket-cli/internal/common"
 )
 
+// ListenerConfig holds optional listener daemon configuration.
+type ListenerConfig struct {
+	UpdateCheckInterval string `json:"update_check_interval,omitempty"` // Go duration, default "12h"
+	FlushInterval       string `json:"flush_interval,omitempty"`        // Go duration, default "5s"
+}
+
+// ParseUpdateCheckInterval returns the update check interval as time.Duration.
+func (c *ListenerConfig) ParseUpdateCheckInterval() time.Duration {
+	if c == nil || c.UpdateCheckInterval == "" {
+		return 12 * time.Hour
+	}
+	d, err := time.ParseDuration(c.UpdateCheckInterval)
+	if err != nil || d < 1*time.Minute {
+		return 12 * time.Hour
+	}
+	return d
+}
+
+// ParseFlushInterval returns the flush interval as time.Duration.
+func (c *ListenerConfig) ParseFlushInterval() time.Duration {
+	if c == nil || c.FlushInterval == "" {
+		return 5 * time.Second
+	}
+	d, err := time.ParseDuration(c.FlushInterval)
+	if err != nil || d < 1*time.Second {
+		return 5 * time.Second
+	}
+	return d
+}
+
 // Credentials 凭证信息
 type Credentials struct {
 	AgentID     string    `json:"agent_id"`
@@ -17,9 +47,8 @@ type Credentials struct {
 	ExpireAt    time.Time `json:"expire_at"`
 	CreatedAt   time.Time `json:"created_at"`
 	// PushEnabled 控制 listener 是否在收到消息时主动推送到 OpenClaw。
-	// 默认 true：每条消息到达后立即推送到 OpenClaw（push 模式）。
-	// 设为 false：仅在心跳时由 OpenClaw 主动拉取（pull 模式）。
-	PushEnabled bool `json:"push_enabled"`
+	PushEnabled bool            `json:"push_enabled"`
+	Listener    *ListenerConfig `json:"listener,omitempty"`
 }
 
 // CredentialsConfig 凭证配置（用于JSON持久化）
@@ -31,7 +60,8 @@ type CredentialsConfig struct {
 	MQTTURL     string  `json:"mqtt_url"`
 	ExpiresAt   string  `json:"expires_at"`
 	// PushEnabled 控制消息推送模式。nil 或缺失时默认 true（即时推送）。
-	PushEnabled *bool   `json:"push_enabled,omitempty"`
+	PushEnabled *bool           `json:"push_enabled,omitempty"`
+	Listener    *ListenerConfig `json:"listener,omitempty"`
 }
 
 // IsExpired 检查凭证是否过期
@@ -83,6 +113,7 @@ func LoadCredentials(path string) (*Credentials, error) {
 		APIURL:      credsConfig.APIURL,
 		MQTTURL:     credsConfig.MQTTURL,
 		PushEnabled: pushEnabled,
+		Listener:    credsConfig.Listener,
 	}
 
 	if credsConfig.ExpiresAt != "" {
