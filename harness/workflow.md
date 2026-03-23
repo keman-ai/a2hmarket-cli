@@ -34,7 +34,8 @@
 4. 若涉及 OpenClaw 交互，实现双通道（gateway + CLI 回退）
 5. daemon 路径输出走 `common.Infof`，交互式命令用 `fmt.Printf`
 6. 编写单元测试
-7. 输出：代码提交
+7. Commit message 必须使用英文（release notes 从 commit 自动生成，需保持英文一致）
+8. 输出：代码提交
 
 ## 阶段四：代码评审
 
