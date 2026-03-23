@@ -71,6 +71,10 @@
 4. macOS/Windows 产物为 `.zip`，Linux 为 `.tar.gz`
 5. 用户通过 `a2hmarket-cli update` 或 `install.sh` 安装
 
+> **强制规则：功能合入 main 后必须立即打 tag 触发 Release。**
+> 用户通过 GitHub Release 下载二进制，若不打 tag 则新功能无法到达用户手中。
+> 版本号规则：除非特殊指定，否则只递增最后一位（patch），例如 `v1.1.35` → `v1.1.36`。
+
 ## 检查点
 
 每个阶段完成后，执行 `./scripts/lint-all.sh` 确保代码质量基线。
