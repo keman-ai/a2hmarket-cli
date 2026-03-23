@@ -29,6 +29,9 @@ func main() {
 		Commands: []*cli.Command{
 			genAuthCodeCommand(),
 			getAuthCommand(),
+			registerCommand(),
+			loginCommand(),
+			resetPasswordCommand(),
 			sendCommand(),
 			listenCommand(),
 			listenerCommand(),

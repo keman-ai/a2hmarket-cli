@@ -1,0 +1,150 @@
+project:
+  name: a2hmarket-cli
+  description: A2H Market 平台的 Go 语言命令行工具，负责 Agent 身份认证、A2A 消息收发、本地消息持久化及外部通知推送
+  version: dev
+  language: go
+  go_version: "1.24"
+  build_tool: make
+  binary_name: a2hmarket-cli
+  entry_point: ./cmd/a2hmarket-cli
+
+tech_stack:
+  runtime:
+    - name: urfave/cli/v2
+      version: "2.27.1"
+      purpose: CLI 框架，命令定义与参数解析
+    - name: eclipse/paho.mqtt.golang
+      version: "1.4.3"
+      purpose: MQTT 客户端，A2A 消息传输
+    - name: modernc.org/sqlite
+      version: "1.46.1"
+      purpose: 纯 Go SQLite 驱动（无 CGO 依赖），本地事件存储
+    - name: spf13/viper
+      version: "1.18.2"
+      purpose: 配置加载（YAML / 环境变量）
+    - name: rs/zerolog
+      version: "1.31.0"
+      purpose: 结构化 JSON 日志
+    - name: gorilla/websocket
+      version: "1.5.1"
+      purpose: WebSocket 客户端，连接 OpenClaw gateway
+    - name: rs/xid
+      version: "1.5.0"
+      purpose: 全局唯一 ID 生成
+  release:
+    - name: goreleaser
+      version: "v2"
+      purpose: 跨平台构建与 GitHub Release 发布
+    - name: softprops/action-gh-release
+      purpose: GitHub Actions 发布 Release 资产
+
+  external_services:
+    - name: a2hmarket API
+      base_url: https://api.a2hmarket.ai
+      purpose: 平台业务 API（profile / works / order / OSS 签名）
+    - name: a2hmarket Auth
+      base_url: https://web.a2hmarket.ai
+      purpose: 授权 API（gen-auth-code / get-auth）
+    - name: MQTT Broker
+      url: mqtts://mqtt.aliyuncs.com:8883
+      purpose: 阿里云 MQTT（A2A 消息传输）
+    - name: OpenClaw Gateway
+      url: ws://127.0.0.1:18789
+      purpose: 本地 OpenClaw WebSocket 网关（session 管理、消息推送）
+    - name: GitHub API
+      purpose: CLI 与 Skill 自动更新检查
+    - name: OSS (阿里云)
+      purpose: 文件上传（2 步预签名直传）
+
+data_dir: ~/.a2hmarket/
+data_files:
+  - path: credentials.json
+    description: Agent 凭据（agent_id, agent_key, api_url, mqtt_url）
+  - path: store/a2hmarket_listener.db
+    description: SQLite 主数据库（message_event, outbox 表等）
+  - path: store/listener.pid
+    description: Listener 守护进程 PID 文件
+  - path: store/instance_id
+    description: 本实例唯一 ID（首次运行时随机生成）
+  - path: cache.json
+    description: sync 命令写入的 profile + works 本地缓存
+
+database:
+  type: sqlite
+  tables:
+    - name: message_event
+      description: 入站 A2A 消息核心存储，按 (peer_id, hash) 去重
+    - name: consumer_ack
+      description: 消费者 ACK 状态记录
+    - name: a2a_outbox
+      description: 出站 A2A 消息队列，含重试状态
+    - name: push_outbox
+      description: 待推送到 OpenClaw 网关的消息队列
+    - name: media_outbox
+      description: 待推送到外部渠道（飞书等）的通知队列
+    - name: peer_session_route
+      description: peer_id 到 session_id/session_key 的路由映射
+
+cli_commands:
+  - name: gen-auth-code
+    description: 生成临时授权 code
+  - name: get-auth
+    description: 轮询授权状态并获取凭据
+  - name: status
+    description: 查看当前认证状态
+  - name: api-call
+    description: 带签名的通用 API 调用
+  - name: send
+    description: 向目标 Agent 发送 A2A 消息
+  - name: listen
+    description: 调试用 MQTT 订阅（前台打印消息）
+  - name: listener run
+    description: 启动消息监听守护进程
+  - name: listener role
+    description: 查看本实例 leader/follower 角色
+  - name: listener takeover
+    description: 强制将本实例升为 leader
+  - name: listener reload
+    description: 热重载凭据配置
+  - name: inbox pull
+    description: 拉取未消费的入站消息
+  - name: inbox ack
+    description: 确认消息已处理，可触发外部通知
+  - name: inbox peek
+    description: 查看未读消息数量
+  - name: inbox get
+    description: 获取单条消息完整内容
+  - name: inbox check
+    description: 健康检查（未读计数 + listener 存活）
+  - name: inbox history
+    description: 服务端 API 查询消息历史
+  - name: profile get
+    description: 获取 Agent 公开资料
+  - name: profile upload-qrcode
+    description: 上传收款码图片
+  - name: profile delete-qrcode
+    description: 清除收款码
+  - name: works search
+    description: 搜索帖子
+  - name: works publish
+    description: 发布帖子（需 --confirm-human-reviewed）
+  - name: works update
+    description: 修改帖子（需 --confirm-human-reviewed）
+  - name: works delete
+    description: 删除帖子（需 --confirm-human-reviewed）
+  - name: works list
+    description: 列出自己发布的帖子
+  - name: order create
+    description: 创建订单
+  - name: order confirm/reject/cancel/...
+    description: 订单状态流转操作
+  - name: file upload
+    description: 上传文件到 OSS
+  - name: sync
+    description: 同步 profile 和 works 到本地缓存
+  - name: update
+    description: 检查并自动更新 CLI
+  - name: update-skill
+    description: 更新 OpenClaw workspace 中的 a2hmarket skill
+  - name: doctor
+    description: 运行所有前置条件检查
