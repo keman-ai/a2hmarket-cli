@@ -67,14 +67,23 @@
 **负责角色**：开发者
 
 1. 本地构建：`make build`
-2. 发布：推送 `v*` 标签触发 GitHub Actions Release
-3. CI 使用 GoReleaser 构建多平台二进制（linux/darwin/windows x amd64/arm64）
-4. macOS/Windows 产物为 `.zip`，Linux 为 `.tar.gz`
-5. 用户通过 `a2hmarket-cli update` 或 `install.sh` 安装
+2. 编写 `RELEASE_NOTES.md`（见下方规则）
+3. 推送 `v*` 标签触发 GitHub Actions Release
+4. CI 使用 GoReleaser 构建多平台二进制（linux/darwin/windows x amd64/arm64）
+5. macOS/Windows 产物为 `.zip`，Linux 为 `.tar.gz`
+6. 用户通过 `a2hmarket-cli update` 或 `install.sh` 安装
 
 > **强制规则：功能合入 main 后必须立即打 tag 触发 Release。**
 > 用户通过 GitHub Release 下载二进制，若不打 tag 则新功能无法到达用户手中。
 > 版本号规则：除非特殊指定，否则只递增最后一位（patch），例如 `v1.1.35` → `v1.1.36`。
+
+> **Release Notes 规则：打 tag 前必须生成 `RELEASE_NOTES.md` 并提交。**
+> CI 优先读取此文件作为 GitHub Release 描述；若不存在则 fallback 到自动生成。
+> 编写要求：
+> 1. 英文，面向用户，说人话，不罗列 commit log
+> 2. 按类别分组：New Features / Improvements / Bug Fixes（没有的类别省略）
+> 3. 同一类事情合并为一条，只保留用户关心的变更，过滤掉 CI/chore/harness 等内部变更
+> 4. 每条用一句话说清楚对用户的影响
 
 ## 检查点
 

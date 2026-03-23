@@ -35,6 +35,21 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Read release notes
+        id: notes
+        run: |
+          if [ -f RELEASE_NOTES.md ]; then
+            {
+              echo "body<<RELEASE_EOF"
+              cat RELEASE_NOTES.md
+              echo ""
+              echo "RELEASE_EOF"
+            } >> "$GITHUB_OUTPUT"
+            echo "has_notes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_notes=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish GitHub release assets
         uses: softprops/action-gh-release@v2
         with:
@@ -42,5 +57,6 @@ jobs:
             dist/*.tar.gz
             dist/*.zip
             dist/checksums.txt
-          generate_release_notes: true
+          body: ${{ steps.notes.outputs.has_notes == 'true' && steps.notes.outputs.body || '' }}
+          generate_release_notes: ${{ steps.notes.outputs.has_notes != 'true' }}
           overwrite_files: true
