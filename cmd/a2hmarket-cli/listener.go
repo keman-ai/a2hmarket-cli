@@ -239,21 +239,30 @@ func listenerRunCmd(c *cli.Context) error {
 			go func() {
 				env, err := protocol.ParseEnvelope(msg.Payload)
 				if err != nil {
-					return // unparseable, skip
+					common.Warnf("push-url: failed to parse envelope: %v", err)
+					return
 				}
+				// Build content: prefer text field, fall back to full payload JSON
 				text, _ := env.Payload["text"].(string)
+				if text == "" {
+					// Serialize entire payload as content if no text field
+					payloadBytes, _ := json.Marshal(env.Payload)
+					text = string(payloadBytes)
+				}
 				body, _ := json.Marshal(map[string]interface{}{
 					"agent_id":   env.SenderID,
 					"agent_name": env.SenderID,
 					"content":    text,
 					"metadata":   env.Payload,
 				})
+				common.Infof("push-url: posting to %s from=%s content_len=%d", pushURL, env.SenderID, len(text))
 				resp, err := httpClient.Post(pushURL, "application/json", strings.NewReader(string(body)))
 				if err != nil {
 					common.Warnf("push-url POST failed: %v", err)
 					return
 				}
 				resp.Body.Close()
+				common.Infof("push-url: POST success status=%d", resp.StatusCode)
 			}()
 		}
 	})
