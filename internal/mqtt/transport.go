@@ -35,8 +35,9 @@ type Transport struct {
 	connectionClientID string
 	cleanSession       bool // default false; true for one-shot publishers
 
-	onMessage   func(msg Message)
-	onReconnect func()
+	onMessage      func(msg Message)
+	onReconnect    func()
+	reconnectGuard func() bool // returns false to abort reconnect
 }
 
 // SetCleanSession overrides the CleanSession flag before Connect is called.
@@ -76,6 +77,12 @@ func (t *Transport) OnMessage(handler func(msg Message)) {
 // OnReconnect registers a callback invoked after each successful reconnect.
 func (t *Transport) OnReconnect(handler func()) {
 	t.onReconnect = handler
+}
+
+// OnReconnectGuard registers a guard called before each reconnect attempt.
+// If it returns false, the reconnect loop exits immediately.
+func (t *Transport) OnReconnectGuard(guard func() bool) {
+	t.reconnectGuard = guard
 }
 
 // Connect connects to the MQTT broker.
@@ -219,6 +226,11 @@ func (t *Transport) reconnectLoop(connClientID string, lostErr error) {
 		d := delays[min(attempt, len(delays)-1)] * time.Second
 		time.Sleep(d)
 		attempt++
+
+		// Guard check: abort reconnect if lease is no longer valid.
+		if t.reconnectGuard != nil && !t.reconnectGuard() {
+			return
+		}
 
 		// Refresh token before reconnect
 		cred, err := t.tokenClient.GetToken(connClientID, true)

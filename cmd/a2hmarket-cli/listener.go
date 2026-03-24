@@ -232,6 +232,28 @@ func listenerRunCmd(c *cli.Context) error {
 		common.Infof("reconnected — resubscribing")
 	})
 
+	// Reconnect guard: leader verifies epoch via heartbeat before reconnecting.
+	// Prevents ping-pong when a new leader has taken over.
+	shutdownCh := make(chan string, 1)
+	if role == lease.RoleLeader {
+		transport.OnReconnectGuard(func() bool {
+			hb, err := leaseClient.Heartbeat(instanceID, epoch)
+			if err != nil {
+				// Network error — allow reconnect (may be transient).
+				return true
+			}
+			if !hb.OK {
+				common.Warnf("reconnect guard: lease revoked (reason=%s), aborting reconnect", hb.Reason)
+				select {
+				case shutdownCh <- hb.Reason:
+				default:
+				}
+				return false
+			}
+			return true
+		})
+	}
+
 	if err := transport.Connect(); err != nil {
 		return fmt.Errorf("mqtt connect: %w", err)
 	}
@@ -247,7 +269,7 @@ func listenerRunCmd(c *cli.Context) error {
 		instanceID, role, creds.AgentID, pushEnabled)
 
 	// Heartbeat ticker (15s) — sends heartbeat to lease control plane.
-	heartbeatTicker := time.NewTicker(15 * time.Second)
+	heartbeatTicker := time.NewTicker(5 * time.Second)
 	defer heartbeatTicker.Stop()
 
 	// Follower poll ticker (20s) — follower periodically calls acquire so it
@@ -318,6 +340,10 @@ func listenerRunCmd(c *cli.Context) error {
 			}
 			pushEnabled = newCreds.PushEnabled
 			common.Infof("reload: push_enabled=%v", pushEnabled)
+
+		case reason := <-shutdownCh:
+			common.Infof("Shutting down listener (lease revoked via reconnect guard: %s)", reason)
+			return nil
 
 		case <-heartbeatTicker.C:
 			if role != lease.RoleLeader {
