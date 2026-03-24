@@ -56,6 +56,7 @@ func listenerCommand() *cli.Command {
 					&cli.StringFlag{Name: "config-dir", Value: "~/.a2hmarket", Usage: "config directory"},
 					&cli.BoolFlag{Name: "verbose", Value: false, Usage: "print full envelope JSON"},
 					&cli.BoolFlag{Name: "push-enabled", Value: false, Usage: "enable push to OpenClaw gateway"},
+					&cli.StringFlag{Name: "push-url", Value: "", Usage: "HTTP URL to POST incoming messages to (e.g. http://127.0.0.1:18790/push)"},
 					&cli.StringFlag{Name: "a2a-shared-secret", Value: "", Usage: "shared secret for A2A envelope signature verification"},
 				},
 			},
@@ -139,6 +140,7 @@ func listenCmd(c *cli.Context) error {
 func listenerRunCmd(c *cli.Context) error {
 	configDir := expandHome(c.String("config-dir"))
 	verbose := c.Bool("verbose")
+	pushURL := c.String("push-url")
 	sharedSecret := c.String("a2a-shared-secret")
 
 	creds, err := loadCreds(configDir)
@@ -224,12 +226,35 @@ func listenerRunCmd(c *cli.Context) error {
 	}
 	a2aSvc := a2a.NewA2AService(es, transport, routerCfg)
 
-	// Register the combined handler: A2AService routing + optional verbose print.
+	// Register the combined handler: A2AService routing + optional verbose print + push-url.
 	// Note: we register ONE handler; Start() must not be called separately.
+	httpClient := &http.Client{Timeout: 5 * time.Second}
 	transport.OnMessage(func(msg mqttpkg.Message) {
 		a2aSvc.Route(msg)
 		if verbose {
 			printMessage(msg, true)
+		}
+		// --push-url: POST parsed envelope to external HTTP endpoint (e.g. desktop app)
+		if pushURL != "" {
+			go func() {
+				env, err := protocol.ParseEnvelope(msg.Payload)
+				if err != nil {
+					return // unparseable, skip
+				}
+				text, _ := env.Payload["text"].(string)
+				body, _ := json.Marshal(map[string]interface{}{
+					"agent_id":   env.SenderID,
+					"agent_name": env.SenderID,
+					"content":    text,
+					"metadata":   env.Payload,
+				})
+				resp, err := httpClient.Post(pushURL, "application/json", strings.NewReader(string(body)))
+				if err != nil {
+					common.Warnf("push-url POST failed: %v", err)
+					return
+				}
+				resp.Body.Close()
+			}()
 		}
 	})
 
