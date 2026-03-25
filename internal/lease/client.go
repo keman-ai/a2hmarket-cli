@@ -36,12 +36,20 @@ const (
 	RoleStandalone Role = "standalone"
 )
 
+// OldLeaseInfo contains info about the displaced leader after a takeover.
+type OldLeaseInfo struct {
+	InstanceID string `json:"instanceId"`
+	Hostname   string `json:"hostname"`
+	ClientID   string `json:"clientId"`
+}
+
 // AcquireResult is returned from the acquire call.
 type AcquireResult struct {
-	Role             Role   `json:"role"`
-	Epoch            int64  `json:"epoch"`
-	LeaseUntil       int64  `json:"leaseUntil"`       // Unix milliseconds
-	LeaderInstanceID string `json:"leaderInstanceId"` // populated when follower
+	Role             Role          `json:"role"`
+	Epoch            int64         `json:"epoch"`
+	LeaseUntil       int64         `json:"leaseUntil"`       // Unix milliseconds
+	LeaderInstanceID string        `json:"leaderInstanceId"` // populated when follower
+	OldLease         *OldLeaseInfo `json:"oldLease"`         // populated when takeover displaced a leader
 }
 
 // HeartbeatResult is returned from the heartbeat call.

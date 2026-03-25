@@ -185,7 +185,7 @@ func checkMQTTConnectivity(creds *config.Credentials, hasCreds bool) map[string]
 			"message": "skipped (no credentials)",
 		}
 	}
-	tc := mqttpkg.NewTokenClient(creds.APIURL, creds.AgentID, creds.AgentKey)
+	tc := mqttpkg.NewTokenClient(creds.APIURL, creds.AgentID, creds.AgentKey, version)
 	clientID := mqttpkg.BuildClientID(creds.AgentID)
 	_, err := tc.GetToken(clientID, true)
 	if err != nil {

@@ -105,7 +105,7 @@ func listenCmd(c *cli.Context) error {
 		return fmt.Errorf("instance-id: %w", err)
 	}
 
-	tc := mqttpkg.NewTokenClient(creds.APIURL, creds.AgentID, creds.AgentKey)
+	tc := mqttpkg.NewTokenClient(creds.APIURL, creds.AgentID, creds.AgentKey, version)
 	transport := mqttpkg.NewTransport(creds.MQTTURL, tc, creds.AgentID, instanceID)
 
 	transport.OnMessage(func(msg mqttpkg.Message) {
@@ -175,11 +175,13 @@ func listenerRunCmd(c *cli.Context) error {
 	connClientID := mqttpkg.BuildConnectionClientID(creds.AgentID, instanceID)
 
 	// Acquire lease (best-effort; fall back to standalone).
+	// Default forceTakeover=true: last device wins, old instance auto-exits.
 	leaseClient := lease.NewClient(creds.APIURL, creds.AgentID, creds.AgentKey)
 	acquireReq := lease.AcquireRequest{
-		InstanceID: instanceID,
-		ClientID:   connClientID,
-		Hostname:   hostname,
+		InstanceID:    instanceID,
+		ClientID:      connClientID,
+		Hostname:      hostname,
+		ForceTakeover: true,
 	}
 
 	role := lease.RoleStandalone
@@ -194,10 +196,13 @@ func listenerRunCmd(c *cli.Context) error {
 		epoch = result.Epoch
 		leaseUntil = result.LeaseUntil
 		common.Infof("lease acquired role=%s epoch=%d leaseUntil=%d", role, epoch, leaseUntil)
+		if result.OldLease != nil && result.OldLease.Hostname != "" {
+			fmt.Printf("⚠ 已从 %s 接管 Agent，旧实例将自动退出\n", result.OldLease.Hostname)
+		}
 	}
 
 	// MQTT transport setup.
-	tc := mqttpkg.NewTokenClient(creds.APIURL, creds.AgentID, creds.AgentKey)
+	tc := mqttpkg.NewTokenClient(creds.APIURL, creds.AgentID, creds.AgentKey, version)
 
 	var transport *mqttpkg.Transport
 	if role == lease.RoleFollower {
@@ -342,6 +347,7 @@ func listenerRunCmd(c *cli.Context) error {
 			common.Infof("reload: push_enabled=%v", pushEnabled)
 
 		case reason := <-shutdownCh:
+			fmt.Println("Agent 已转移到新设备，当前实例已停止。如需恢复，请重新运行 listener run")
 			common.Infof("Shutting down listener (lease revoked via reconnect guard: %s)", reason)
 			return nil
 
@@ -362,6 +368,7 @@ func listenerRunCmd(c *cli.Context) error {
 				// connect with a suffixed clientId — no more MQTT contention.
 				common.Warnf("heartbeat revoked (reason=%s) — unsubscribing and shutting down", hbResult.Reason)
 				transport.Unsubscribe()
+				fmt.Println("Agent 已转移到新设备，当前实例已停止。如需恢复，请重新运行 listener run")
 				common.Infof("Shutting down listener (lease revoked, restart to run as follower)")
 				return nil
 			}

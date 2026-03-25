@@ -78,22 +78,25 @@ func OutgoingTopic(targetAgentID string) string {
 
 // TokenClient fetches and caches MQTT credentials from the token server.
 type TokenClient struct {
-	apiURL   string // e.g. "http://api.a2hmarket.ai"
-	agentID  string
-	agentKey string
-	http     *http.Client
-	mu       sync.Mutex
-	cache    map[string]*Credential
+	apiURL        string // e.g. "http://api.a2hmarket.ai"
+	agentID       string
+	agentKey      string
+	clientVersion string // sent as X-Client-Version header
+	http          *http.Client
+	mu            sync.Mutex
+	cache         map[string]*Credential
 }
 
 // NewTokenClient creates a new token client.
-func NewTokenClient(apiURL, agentID, agentKey string) *TokenClient {
+// clientVersion is sent as X-Client-Version header for version gate enforcement.
+func NewTokenClient(apiURL, agentID, agentKey, clientVersion string) *TokenClient {
 	return &TokenClient{
-		apiURL:   strings.TrimRight(apiURL, "/"),
-		agentID:  agentID,
-		agentKey: agentKey,
-		http:     &http.Client{Timeout: 15 * time.Second},
-		cache:    make(map[string]*Credential),
+		apiURL:        strings.TrimRight(apiURL, "/"),
+		agentID:       agentID,
+		agentKey:      agentKey,
+		clientVersion: clientVersion,
+		http:          &http.Client{Timeout: 15 * time.Second},
+		cache:         make(map[string]*Credential),
 	}
 }
 
@@ -143,6 +146,9 @@ func (tc *TokenClient) fetchToken(clientID string) (*Credential, error) {
 	req.Header.Set("X-Agent-Id", tc.agentID)
 	req.Header.Set("X-Timestamp", timestampSec)
 	req.Header.Set("X-Agent-Signature", signature)
+	if tc.clientVersion != "" {
+		req.Header.Set("X-Client-Version", tc.clientVersion)
+	}
 
 	resp, err := tc.http.Do(req)
 	if err != nil {

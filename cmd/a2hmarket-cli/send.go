@@ -124,7 +124,7 @@ func sendMessageCmd(c *cli.Context) error {
 	common.Infof("send to=%s type=%s msg_id=%s", targetAgentID, messageType, signed.MessageID)
 
 	// Use a short-lived _pub_ clientId so we never kick a running listener.
-	tc := mqttpkg.NewTokenClient(creds.APIURL, creds.AgentID, creds.AgentKey)
+	tc := mqttpkg.NewTokenClient(creds.APIURL, creds.AgentID, creds.AgentKey, version)
 	sendClientID := mqttpkg.BuildSendClientID(creds.AgentID)
 	transport := mqttpkg.NewTransportWithClientID(creds.MQTTURL, tc, creds.AgentID, sendClientID)
 
