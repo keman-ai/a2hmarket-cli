@@ -37,6 +37,8 @@ func main() {
 			syncCommand(),
 			worksCommand(),
 			orderCommand(),
+			addressCommand(),
+			discussionCommand(),
 			fileCommand(),
 			statusCommand(),
 			apiCallCommand(),
