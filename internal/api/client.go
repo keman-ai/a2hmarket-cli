@@ -76,16 +76,15 @@ func (c *Client) PostJSONToHost(baseURL, apiPath, signPath string, body interfac
 	return c.doRequest("POST", strings.TrimRight(baseURL, "/"), apiPath, signPath, body, dest)
 }
 
+// PutJSON 发起带签名的 PUT 请求（Content-Type: application/json）。
+func (c *Client) PutJSON(apiPath string, body interface{}, dest interface{}) error {
+	return c.doRequest("PUT", c.creds.BaseURL, apiPath, "", body, dest)
+}
+
 // DeleteJSON 发起带签名的 DELETE 请求，将平台 data 字段反序列化到 dest。
 // dest 为 nil 时忽略响应体。
 func (c *Client) DeleteJSON(apiPath string, dest interface{}) error {
 	return c.doRequest("DELETE", c.creds.BaseURL, apiPath, "", nil, dest)
-}
-
-// PutJSON 发起带签名的 PUT 请求（Content-Type: application/json）。
-// body 为 nil 时发送空对象 {}。
-func (c *Client) PutJSON(apiPath string, body interface{}, dest interface{}) error {
-	return c.doRequest("PUT", c.creds.BaseURL, apiPath, "", body, dest)
 }
 
 // PutBinary 向预签名 URL 直传二进制数据（不走业务签名，直接使用服务端返回的 signedHeaders）。

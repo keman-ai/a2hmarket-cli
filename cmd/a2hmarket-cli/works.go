@@ -12,6 +12,8 @@ const (
 	worksPublishAPI = "/findu-user/api/v1/user/works/change-requests"
 	worksListAPI    = "/findu-user/api/v1/user/works/public"
 	worksDeleteAPI  = "/findu-user/api/v1/user/works"
+	worksReplyAPI   = "/findu-user/api/v1/user/works"     // /{userId}/{worksId}/replies
+	worksReplyPubAPI = "/findu-user/api/v1/user/works/public" // /{worksId}/replies (public query)
 )
 
 func worksCommand() *cli.Command {
@@ -38,7 +40,7 @@ func worksCommand() *cli.Command {
 				Action: worksPublishCmd,
 				Flags: []cli.Flag{
 					configDirFlag(),
-					&cli.IntFlag{Name: "type", Usage: "2=demand 3=service", Required: true},
+					&cli.IntFlag{Name: "type", Usage: "2=demand 3=service 4=discussion", Required: true},
 					&cli.StringFlag{Name: "title", Usage: "post title", Required: true},
 					&cli.StringFlag{Name: "content", Usage: "post content", Required: true},
 					&cli.StringFlag{Name: "expected-price", Usage: "expected price text (wrapped into extendInfo)"},
@@ -55,7 +57,7 @@ func worksCommand() *cli.Command {
 				Flags: []cli.Flag{
 					configDirFlag(),
 					&cli.StringFlag{Name: "works-id", Usage: "works ID to update", Required: true},
-					&cli.IntFlag{Name: "type", Usage: "2=demand 3=service", Required: true},
+					&cli.IntFlag{Name: "type", Usage: "2=demand 3=service 4=discussion", Required: true},
 					&cli.StringFlag{Name: "title", Usage: "post title", Required: true},
 					&cli.StringFlag{Name: "content", Usage: "post content"},
 					&cli.StringFlag{Name: "expected-price", Usage: "expected price text (wrapped into extendInfo)"},
@@ -81,9 +83,31 @@ func worksCommand() *cli.Command {
 				Action: worksListCmd,
 				Flags: []cli.Flag{
 					configDirFlag(),
-					&cli.IntFlag{Name: "type", Usage: "2=demand 3=service"},
+					&cli.IntFlag{Name: "type", Usage: "2=demand 3=service 4=discussion"},
 					&cli.IntFlag{Name: "page", Value: 1, Usage: "page number"},
 					&cli.IntFlag{Name: "page-size", Value: 20, Usage: "page size"},
+				},
+			},
+			{
+				Name:   "reply",
+				Usage:  "Reply to a works post (讨论帖回帖)",
+				Action: worksReplyCmd,
+				Flags: []cli.Flag{
+					configDirFlag(),
+					&cli.StringFlag{Name: "works-id", Usage: "works ID to reply to", Required: true},
+					&cli.StringFlag{Name: "content", Usage: "reply content", Required: true},
+					&cli.StringFlag{Name: "parent-reply-id", Usage: "parent reply ID for nested reply (楼中楼)"},
+				},
+			},
+			{
+				Name:   "replies",
+				Usage:  "List replies of a works post",
+				Action: worksRepliesListCmd,
+				Flags: []cli.Flag{
+					configDirFlag(),
+					&cli.StringFlag{Name: "works-id", Usage: "works ID", Required: true},
+					&cli.IntFlag{Name: "page", Value: 1, Usage: "page number"},
+					&cli.IntFlag{Name: "page-size", Value: 10, Usage: "page size"},
 				},
 			},
 		},
@@ -313,4 +337,67 @@ func worksListCmd(c *cli.Context) error {
 		return outputError("works.list", err)
 	}
 	return outputOK("works.list", data)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// works reply (回帖)
+// ─────────────────────────────────────────────────────────────────────────────
+
+func worksReplyCmd(c *cli.Context) error {
+	worksID := strings.TrimSpace(c.String("works-id"))
+	content := strings.TrimSpace(c.String("content"))
+	if worksID == "" || content == "" {
+		return outputError("works.reply", fmt.Errorf("--works-id and --content are required"))
+	}
+
+	creds, err := loadCreds(expandHome(c.String("config-dir")))
+	if err != nil {
+		return err
+	}
+	client := buildAPIClient(creds)
+
+	body := map[string]interface{}{
+		"content": content,
+	}
+	if parentID := strings.TrimSpace(c.String("parent-reply-id")); parentID != "" {
+		body["parentReplyId"] = parentID
+	}
+
+	// POST /findu-user/api/v1/user/works/{userId}/{worksId}/replies
+	// userId is the current agent's user — use agent_id from creds
+	apiPath := fmt.Sprintf("%s/%s/%s/replies", worksReplyAPI, creds.AgentID, worksID)
+	var data interface{}
+	if err := client.PostJSON(apiPath, body, &data); err != nil {
+		return outputError("works.reply", err)
+	}
+	return outputOK("works.reply", data)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// works replies (查看回帖列表)
+// ─────────────────────────────────────────────────────────────────────────────
+
+func worksRepliesListCmd(c *cli.Context) error {
+	worksID := strings.TrimSpace(c.String("works-id"))
+	if worksID == "" {
+		return outputError("works.replies", fmt.Errorf("--works-id is required"))
+	}
+
+	creds, err := loadCreds(expandHome(c.String("config-dir")))
+	if err != nil {
+		return err
+	}
+	client := buildAPIClient(creds)
+
+	page := c.Int("page")
+	pageSize := c.Int("page-size")
+
+	// GET /findu-user/api/v1/user/works/public/{worksId}/replies?page=1&pageSize=10
+	apiPath := fmt.Sprintf("%s/%s/replies?page=%d&pageSize=%d", worksReplyPubAPI, worksID, page, pageSize)
+	signPath := fmt.Sprintf("%s/%s/replies", worksReplyPubAPI, worksID)
+	var data interface{}
+	if err := client.GetJSON(apiPath, signPath, &data); err != nil {
+		return outputError("works.replies", err)
+	}
+	return outputOK("works.replies", data)
 }

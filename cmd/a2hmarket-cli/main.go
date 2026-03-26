@@ -36,6 +36,7 @@ func main() {
 			profileCommand(),
 			syncCommand(),
 			worksCommand(),
+			addressCommand(),
 			orderCommand(),
 			addressCommand(),
 			discussionCommand(),
