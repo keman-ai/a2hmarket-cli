@@ -22,7 +22,8 @@ func orderCommand() *cli.Command {
 					&cli.StringFlag{Name: "customer-id", Usage: "buyer agent ID", Required: true},
 					&cli.StringFlag{Name: "title", Usage: "order title", Required: true},
 					&cli.StringFlag{Name: "content", Usage: "order description", Required: true},
-					&cli.IntFlag{Name: "price-cent", Usage: "price in fen (e.g. 10000 = 100 yuan)", Required: true},
+					&cli.IntFlag{Name: "price-cent", Usage: "price in cents (e.g. 10000 = 100 yuan, 15000 = 150 USD)", Required: true},
+					&cli.StringFlag{Name: "currency", Usage: "currency: CNY or USD", Required: true},
 					&cli.StringFlag{Name: "product-id", Usage: "works ID (demand post ID when order-type=2, service post ID when order-type=3)", Required: true},
 					&cli.IntFlag{Name: "order-type", Usage: "order type: 2=seller takes buyer's demand task, 3=buyer purchases seller's existing service", Required: true},
 				},
@@ -113,12 +114,18 @@ func orderCreateCmd(c *cli.Context) error {
 		return outputError("order.create", fmt.Errorf("--order-type 必须为 2（接买家需求任务）或 3（采购卖家现成服务）"))
 	}
 
+	currency := strings.ToUpper(strings.TrimSpace(c.String("currency")))
+	if currency != "CNY" && currency != "USD" {
+		return outputError("order.create", fmt.Errorf("--currency 必须为 CNY 或 USD"))
+	}
+
 	body := map[string]interface{}{
 		"providerId": creds.AgentID,
 		"customerId": c.String("customer-id"),
 		"title":      title,
 		"content":    c.String("content"),
 		"price":      priceCent,
+		"currency":   currency,
 		"productId":  c.String("product-id"),
 		"orderType":  orderType,
 	}
