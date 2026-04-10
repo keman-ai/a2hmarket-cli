@@ -48,6 +48,8 @@ var mimeMap = map[string]string{
 	".txt": "text/plain", ".csv": "text/csv", ".md": "text/markdown",
 	// archives
 	".zip": "application/zip", ".tar": "application/x-tar", ".gz": "application/gzip",
+	// audio
+	".mp3": "audio/mpeg",
 }
 
 // ProfileQRCodeMIME lists MIME types accepted for payment QR codes.
